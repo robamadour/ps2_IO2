@@ -2,6 +2,8 @@ import pandas as pd
 import numpy as np
 
 def CleanDataSet(data):
+    """Cleans the shining32.csv data."""
+
     # Convert yes/no to 1/0
     dictYes  = {"Yes" : 1, "No" : 0}
     data.replace({"mint": dictYes,"white": dictYes,"fluoride": dictYes, 
@@ -43,6 +45,41 @@ def CleanDataSet(data):
     data["inc"] = data["inc"]/1000
 
     return(data)
+
+def genMCSample(data,ns,consumerId,unobsNames,seed,J):
+    """Generates a new dataset with a similar structure to data, but with "ns"
+    consumers randomly sampled from the data. Also adds draws from a normal 
+    distribution to model unobservable consumer attributes."""
+    
+    # set seed
+    np.random.seed(seed)
+    
+    nUnobs = len(unobsNames) # number of unobservable attributes to generate
+    nConsumers = len(data[consumerId].unique()) # number of consumers in the data
+
+    # random sample from all consumers
+    consumers = 1 + np.random.randint(nConsumers, size=ns)
+
+    # find consumers in the original data and add their attributes to new sample
+    dataIndex = np.zeros(J*ns)
+    for i in range(ns):
+        dataIndex[(J*i):(J*(i+1))] = data[data[consumerId]==consumers[i]].index
+    MCSample = data.iloc[dataIndex].copy()
+
+    # generate unobservable attributes from a normal distribution
+    unobs = np.random.normal(loc=0.0, scale=1.0, size=(ns,nUnobs))
+    unobs = np.kron(unobs,np.ones((J,1)))
+
+    # add "unobservables" to the sample 
+    MCSample[unobsNames] = unobs
+
+    return(MCSample)
+
+def shareChoseJ(data,choice):
+    
+    shares = data[[choice,"product"]].groupby(by="product").mean()
+    return(shares)
+
 
 
 
