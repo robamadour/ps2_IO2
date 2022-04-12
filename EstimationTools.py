@@ -1,5 +1,8 @@
+from asyncio.windows_events import NULL
+from audioop import mul
 from matplotlib.pyplot import axis
 import numpy as np
+import pandas as pd
 from numpy.linalg import inv
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
@@ -11,6 +14,8 @@ class ModelSpecification():
 
 class Model:
     def __init__(self,spec):
+        """Class constructor. Creates a new model.
+        Currently implemented: logit and mixed logit."""
 
         # Unpacking the model spepcification
         self.type   = spec.type # type = logit, nested_logit, mixed_logit, blp
@@ -25,16 +30,81 @@ class Model:
         self.iv     = spec.iv # iv for price
         self.zName  = spec.zeta # consumer attributes
         self.brands = spec.brands        
-        self.n = len(data)
+        self.n = len(self.data)
         self.nu = spec.nu # unobserved consumer attributes
         self.unobsHet = sum(self.nu) > 0 # whether to include unobserved heterogeneity
         self.ns = spec.ns # number of draws for MC integration
         self.secondChoice = spec.secondChoice # whether to use second choice moments
-        self.seed = spec.seed
-        self.XZetaInter = spec.XZetaInter
-        self.X1X2Inter =  spec.X1X2Inter
+        self.seed = spec.seed  # seed for random number generation
+        self.XZetaInter = spec.XZetaInter  # first-choice interactions
+        self.X1X2Inter =  spec.X1X2Inter   # first- and second-choice interaction
 
-    
+        # simulate data for MC integration
+        if self.type != 'logit':
+            k = len(self.xName) + 1
+            self.unobsNames = ["nu" + str(s)  for s in range(k)]
+            self.MCSample = dp.genMCSample(self.data,self.ns,self.i,self.unobsNames,
+                                self.seed,self.J)
+        else:
+            self.unobsNames = []
+            self.MCSample = []
+
+    def fit(self):
+        """Estimate the model"""
+
+        modelType = self.type
+        match modelType:
+            case 'logit':
+                self.estimates, self.se = self.fitLogit()
+            case 'mixed_logit':
+                self.estimates, self.se = self.fitMixedLogit()
+        
+    def reportEstimates(self):
+        """Report parameter estimates."""
+
+        modelType = self.type
+        match modelType:
+            case 'logit':
+                estimates = pd.DataFrame()
+                estimates["var. name"] = self.xName + [self.pName]
+                estimates["coefficient"] = self.estimates
+                estimates["s.e."] = self.se
+            case 'mixed_logit':
+                
+                regressors =  self.xName + [self.pName]
+                consumerAttr = self.zName
+                unobsConsAttr = self.unobsNames
+                nuPosition = self.nu
+                
+            
+                k = len(regressors)
+                ro = len(consumerAttr)
+                ru = sum(self.nu)
+                nParameters = k + k*ro + ru
+
+                XZNames = []
+                for i in range(ro):
+                    for j in range(k):
+                        thisVar = regressors[j] + '_' + consumerAttr[i]
+                        XZNames = XZNames + [thisVar]
+                
+                unobsNames = []
+                for i in range(k):
+                    if nuPosition[i] == 1:
+                        unobsNames = unobsNames + [regressors[i]]
+
+                paramName = ["betaBar"]*k + ["betaO"]*(k*ro) + ["betaU"]*ru
+                varName = regressors + XZNames + unobsNames
+
+                estimates = pd.DataFrame()
+                estimates["coeficient"] = paramName
+                estimates["var. name"] = varName
+                estimates["coefficient"] = self.estimates
+                estimates["s.e."] = self.se
+
+        return estimates
+                
+
     
     def fitLogit(self):
         """Estimate a logit model via GMM"""
@@ -123,6 +193,7 @@ class Model:
         regressors =  self.xName + [self.pName]
         instruments = self.xName + self.iv
         consumerAttr = self.zName
+        unobsConsAttr = self.unobsNames
 
         X = self.data[regressors].to_numpy()    # product characteristics
         Z = self.data[instruments].to_numpy()   # instruments
@@ -137,10 +208,9 @@ class Model:
         dataSecondChoice = self.data[(~ self.data[self.y2Name].isnull()) &
                            ((self.data[self.yName]==1) |
                            (self.data[self.y2Name]==1))]
-        
 
-        # MC sample
-
+        # Sample for MC integration
+        MCSample = self.MCSample
         
         # sizes of sample, regressors and moment conditions
         n, k = X.shape # n = observations; k = number of product characteristics
@@ -155,81 +225,104 @@ class Model:
         nMoment2 = nXZpairs
         nMoment3 = nX1X2pairs
         nMoments = nMoment1 + nMoment2 + nMoment3 # total number of moments
-
-        # If we have unobserved heterogeneity
-        if unobsHet:
-            # TBD: draw from a given dist
-            pass
-        
-        # If we use second choice data
-        if secondChoice:
-            # TBD: get Y2
-            pass    
+         
         
         # add X*Zeta to datasets
-        XZetaNames = ["XZeta" + str(s)  for s in range(nXZpairs)]
+        XZetaNames = ["XZeta_" + str(s)  for s in range(nXZpairs)]
         for i in range(nXZpairs):
             varName = XZetaNames[i]
             Xvar = regressors[xzPairs[i][0]]
             Zetavar = regressors[xzPairs[i][1]]
             dataChosen[varName] = dataChosen[Xvar]*dataChosen[Zetavar]
+            MCSample[varName] = MCSample[Xvar]*MCSample[Zetavar]
 
-        # add X1*X2 to datasets
-        X1X2Names = ["X1X2_" + str(s)  for s in range(nX1X2pairs)]
-        # split dataset into first and second-choice product
-        firstProductData  = dataSecondChoice[dataSecondChoice[self.yName]==1]
-        secondProductData = dataSecondChoice[dataSecondChoice[self.y2Name]==1]
-        # add interaction terms 
-        dataInteractionsX1X2 = firstProductData.copy()
-        for i in range(nX1X2pairs):
-            varName = X1X2Names[i]
-            Xvar = regressors[x1x2Charac[i]]
-            dataInteractionsX1X2[varName] = firstProductData[Xvar]*\
-                                            secondProductData[Xvar]
+        # If we use second choice data, add X1X2 to the sample
+        if secondChoice:             
+            # add X1*X2 to datasets
+            X1X2Names = ["X1X2_" + str(s)  for s in range(nX1X2pairs)]
+            # split dataset into first and second-choice product
+            firstProductData  = dataSecondChoice[dataSecondChoice[self.yName]==1]
+            secondProductData = dataSecondChoice[dataSecondChoice[self.y2Name]==1]
+            # add interaction terms 
+            dataInteractionsX1X2 = firstProductData.copy()
+            for i in range(nX1X2pairs):
+                varName = X1X2Names[i]
+                Xvar = regressors[x1x2Charac[i]]
+                dataInteractionsX1X2[varName] = firstProductData[Xvar]*\
+                                                secondProductData[Xvar]
+                MCSample[varName] = MCSample[Xvar]
+
+        
+        Xr = MCSample[regressors].to_numpy()    # product characteristics
+        Zr = MCSample[instruments].to_numpy()   # instruments
+        Zetar = MCSample[consumerAttr].to_numpy() # observed consumer attributes
+        Nur = MCSample[unobsConsAttr].to_numpy() # unobserved consumer attributes
+        XZetar = MCSample[XZetaNames].to_numpy() # interactions X*Zeta
+        X12r = MCSample[X1X2Names].to_numpy()    # characteristics to interact 
+                                                 # between first and second choice
 
 
         # Compute sample version of each set of moments
 
         # Moment 1: exclusion restriction Cov(Z*Y)
         # number of  moments = l (number of instruments)
-        sampleG1 = (Z*Y).mean(axis=0).T
+        sampleG1 = (Z*Y).mean(axis=0)
+        sampleG1 = np.expand_dims(sampleG1,axis=1)
 
         # Moment 2: first choice moments: Cov(X,zeta)
         # number of momentes = len(interactions between X and Zeta)
         meanXZetaByProduct = dataChosen[XZetaNames+["product"]]\
                               .groupby(by="product").mean().to_numpy()
-        sampleG2 = (jChosenShare*meanXZetaByProduct).mean(axis=0).T
+        sampleG2 = (jChosenShare*meanXZetaByProduct).mean(axis=0)
+        sampleG2 = np.expand_dims(sampleG2,axis=1)
 
         # Moment 3: first= and second-choice moments: Cov(X^1,X^2)
         # number of moments = len(characteristics to compare)
-        meanX1X2ByProduct = dataInteractionsX1X2[X1X2Names+["product"]]\
-                              .groupby(by="product").mean().to_numpy()
-        sampleG3 = (jChosenShare*meanX1X2ByProduct).mean(axis=0).T
+        if secondChoice:             
+            meanX1X2ByProduct = dataInteractionsX1X2[X1X2Names+["product"]]\
+                                .groupby(by="product").mean().to_numpy()
+            sampleG3 = (jChosenShare*meanX1X2ByProduct).mean(axis=0).T
+            sampleG3 = np.expand_dims(sampleG3,axis=1)
+            sampleG = np.vstack((sampleG1,sampleG2,sampleG3))
+        else:
+            sampleG3 = []
+            sampleG = np.vstack((sampleG1,sampleG2))
 
         
         # Initial parameter and Weight matrix
         theta0 = np.zeros([nParameters,1])
         W = np.identity(nMoments)
 
+        # initialize iterations
+        global iteration, lastvalue, functionCount
+        iteration = 0
+        lastValue = 0
+        functionCount = 0
+
         # Minimization
         # first step
-        args = (X, Y, Z, W, j)
-        step1opt = fmin_bfgs(LogitGmmObjective, theta0, args=args)
+        out = False
+        args = (Xr, Zr,Zetar,XZetar,X12r,Nur,j,k,ro,nuPosition,jChosenShare,
+                sampleG,W,out)
+        step1opt = fmin_bfgs(MixedLogitGmmObj, theta0, args=args,
+                              callback=iter_print)
 
-        # second step
-        out = LogitGmmObjective(step1opt, X,Y,Z,W,j,out=True)
-        Omega = np.cov(out[1].T)
-        W2 = inv(Omega)
-        args = (X, Y, Z, W2, j)
-        step2opt = fmin_bfgs(LogitGmmObjective, step1opt, args=args)
+        return(step1opt,step1opt*0.5)
 
-        # Estimate VCV of parameter estimates
-        out = LogitGmmObjective(step2opt, X,Y,Z,W2,j,out=True)
-        G = LogitGmmG(step2opt,X,Y,Z,j)
-        S = np.cov(out[1].T)
-        vcv = inv(G @ inv(S) @ G.T)/n
+        # # second step
+        # out = LogitGmmObjective(step1opt, X,Y,Z,W,j,out=True)
+        # Omega = np.cov(out[1].T)
+        # W2 = inv(Omega)
+        # args = (X, Y, Z, W2, j)
+        # step2opt = fmin_bfgs(LogitGmmObjective, step1opt, args=args)
 
-        return(step2opt,vcv)
+        # # Estimate VCV of parameter estimates
+        # out = LogitGmmObjective(step2opt, X,Y,Z,W2,j,out=True)
+        # G = LogitGmmG(step2opt,X,Y,Z,j)
+        # S = np.cov(out[1].T)
+        # vcv = inv(G @ inv(S) @ G.T)/n
+
+        # return(step2opt,vcv)
 
 
 def softmax(x):
@@ -281,24 +374,18 @@ def LogitGetFittedProb(theta,X,Y,J):
     U = np.expand_dims(X @ theta,axis=1).reshape((J,n//J),order='F')
     Ypred = softmax(U).reshape((n,1),order='F')
     return Ypred
-
-def MixedLogitGmmObj(theta,X,Y,Z,Zeta):
-    """Compute GMM obj. function, J, given data (X,Y,Z) and parameters theta.
+    
+def MixedLogitGmmObj(theta,X,Z,Zeta,XZeta,X12,nu,
+                      J,k,ro,nuPosition,jChosenShare,
+                      sampleG, W, out):
+    """Compute GMM obj. function, given data (X,Y,Z,Zeta,Nu) and parameters theta.
     Mixed Logit model with individual level data."""
-
-    n,k = X.shape
-
-    # first set of moments, G1: predecited choice probability
-    U = np.expand_dims(X @ theta,axis=1).reshape((J,n//J),order='F')
-    Ypred = softmax(U).reshape((n,1),order='F')
-    M = Z*(Y-Ypred)        # moments
-    G3 = M.mean(axis=0).T   # avg. moments
     
-def MixedLogitMoments(theta,X,Z,Zeta,XZeta,nu,
-                      J,k,ro,nuPosition,jChosenShare):
-    
+    global lastValue, functionCount # used in message printing
+
     # shape
     n,k = X.shape
+    ni = n//J # number of consumers
     nXZeta = XZeta.shape[1]
     
     # unpack theta 
@@ -309,50 +396,72 @@ def MixedLogitMoments(theta,X,Z,Zeta,XZeta,nu,
            nu*(np.ones((n,k))*betaU.T)
     
     # utility. each row is a product, each column is a consumer
-    U = np.expand_dims(X*beta,axis=1).sum(axis=1).reshape((J,n//J),order='F')
+    U = (X*beta).sum(axis=1).reshape((J,ni),order='F')
     Ypred = softmax(U).reshape((n,1),order='F')
 
     # moments set 1
     M1 = Z*Ypred  # moments
     # mean over j and N
-    G1 = M1.mean(axis=0).T
+    G1 = M1.mean(axis=0)
+    G1 = np.expand_dims(G1,axis=1) # make it a vector
 
     # moments set 2
     M2 = XZeta*Ypred    # moments
     # weighted mean over j
-    G2 =  (M2.reshape((J,n//J,k),order='F').mean(axis=1)/
-            Ypred.reshape((J,n//J),order='F').mean(axis=1)*
-            jChosenShare).mean(axis=0).T    # avg. moments
+    G2 =  (M2.reshape((J,ni,nXZeta),order='F').mean(axis=1)/
+            Ypred.reshape((J,ni,1),order='F').mean(axis=1)*
+            jChosenShare).mean(axis=0)    # avg. moments
+    G2 = np.expand_dims(G2,axis=1) # make it a vector
     
     # moments 3
-    X2Prob2 = secondChoiceXP(X,U,n,J,k)
-    M3 = (X*X2Prob2)*Ypred    # moments
+    k2 = X12.shape[1]
+    X2Prob2 = secondChoiceXP(X12,U,n,J,k2)
+    M3 = (X12*X2Prob2)*Ypred    # moments
     # weighted mean over j
-    G3 =  (M3.reshape((J,n//J,k),order='F').mean(axis=1)/
-            Ypred.reshape((J,n//J),order='F').mean(axis=1)*
-            jChosenShare).mean(axis=0).T    # avg. moments
+    G3 =  (M3.reshape((J,ni,k2),order='F').mean(axis=1)/
+            np.expand_dims(Ypred.reshape((J,ni),order='F').mean(axis=1),axis=1)*
+            jChosenShare).mean(axis=0)   # avg. moments
+    G3 = np.expand_dims(G3,axis=1) # make it a vector
 
+    # stack moments
+    G = np.vstack((G1,G2,G3))
 
-    return G1, G2, G3
+    # compute difference between sample and model moments
+    Gd = sampleG - G
+
+    # Compute objective (J function)
+    Obj = ni * (Gd.T @ W @ Gd)
+    
+
+    lastValue = Obj
+    functionCount += 1
+
+    if not out:
+        return Obj
+    else:
+        return Obj, M1 # TBD 
 
 def secondChoiceXP(X,U,n,J,k):
 
+    ni = n//J # number of consumers
+
     # reshape: product x consumer
-    X = X.reshape((J,n//J,k),order='F')
+    X = X.reshape((J,ni,k),order='F')
 
     # expand vertically by J
     U = np.kron(np.ones((J,1)),U)
-    X = np.kron(np.ones((J,1)),X)
+    X = np.kron(np.ones((J,1,1)),X)
 
     # remove jth row (1st choice)
     index =  np.identity(J)
-    index = (index == 0).reshape((J^2,1),order='F')
+    index = (index == 0).reshape((J**2,),order='F')
     U = U[index,:]
     X  =X[index,:,:]
 
     # softmax, multiply by X and sum
     Prob = softmax(U)
-    XProb = (X*Prob).reshape((J-1,J,n//J,k),order='F').sum(axis=0)\
+    Prob = np.kron(np.ones((1,1,k)),np.expand_dims(Prob,axis=2)) 
+    XProb = (X*Prob).reshape((J-1,J,ni,k),order='F').sum(axis=0)\
                     .reshape((n,k),order='F')
 
     return XProb    
@@ -373,13 +482,18 @@ def MixedLogitMoment2(X,Zeta,nu,J,k,ro,nuPosition,jChosenShare):
     
 
 def unpackParameters(theta,k,ro,nuPosition):
-    betaBar = theta[:k,:].reshape((k,1))
-    betaO = theta[k:(k+k*ro),:].reshape((k,ro),order='F')
-    betaUp = theta[(k+k*ro):,:]
+    betaBar = theta[:k].reshape((k,1))
+    betaO = theta[k:(k+k*ro)].reshape((k,ro),order='F')
+    betaUp = theta[(k+k*ro):]
     betaU = np.zeros((k,1))
-    betaU[nuPosition,:] = betaUp
+    betaU[nuPosition,:] = np.expand_dims(betaUp,axis=1)
     
     return betaBar, betaO, betaU
 
-
+def iter_print(params):
+    global iteration, lastValue, functionCount
+    iteration += 1
+    print('Func value: {0:}, Iteration: {1:}, \
+           Function Count: {2:}'.format(lastValue, 
+                                         iteration, functionCount))
      
