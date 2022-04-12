@@ -294,10 +294,13 @@ def MixedLogitGmmObj(theta,X,Y,Z,Zeta):
     M = Z*(Y-Ypred)        # moments
     G3 = M.mean(axis=0).T   # avg. moments
     
-def MixedLogitMoment1(theta,X,Z,Zeta,nu,J,k,ro,nuPosition,jChosenShare):
+def MixedLogitMoments(theta,X,Z,Zeta,XZeta,nu,
+                      J,k,ro,nuPosition,jChosenShare):
     
     # shape
     n,k = X.shape
+    nXZeta = XZeta.shape[1]
+    
     # unpack theta 
     betaBar, betaO, betaU = unpackParameters(theta,k,ro,nuPosition)
 
@@ -307,15 +310,67 @@ def MixedLogitMoment1(theta,X,Z,Zeta,nu,J,k,ro,nuPosition,jChosenShare):
     
     # utility. each row is a product, each column is a consumer
     U = np.expand_dims(X*beta,axis=1).sum(axis=1).reshape((J,n//J),order='F')
-    Ypred = (softmax(U)*jChosenShare).reshape((n,1),order='F')
-    M1 = Z*Ypred        # moments
-    G1 = M1.mean(axis=0).T   # avg. moments
+    Ypred = softmax(U).reshape((n,1),order='F')
 
-    return G1, M1
+    # moments set 1
+    M1 = Z*Ypred  # moments
+    # mean over j and N
+    G1 = M1.mean(axis=0).T
 
-def MixedLogitMoment2(X,Zeta,nu,):
+    # moments set 2
+    M2 = XZeta*Ypred    # moments
+    # weighted mean over j
+    G2 =  (M2.reshape((J,n//J,k),order='F').mean(axis=1)/
+            Ypred.reshape((J,n//J),order='F').mean(axis=1)*
+            jChosenShare).mean(axis=0).T    # avg. moments
     
+    # moments 3
+    X2Prob2 = secondChoiceXP(X,U,n,J,k)
+    M3 = (X*X2Prob2)*Ypred    # moments
+    # weighted mean over j
+    G3 =  (M3.reshape((J,n//J,k),order='F').mean(axis=1)/
+            Ypred.reshape((J,n//J),order='F').mean(axis=1)*
+            jChosenShare).mean(axis=0).T    # avg. moments
 
+
+    return G1, G2, G3
+
+def secondChoiceXP(X,U,n,J,k):
+
+    # reshape: product x consumer
+    X = X.reshape((J,n//J,k),order='F')
+
+    # expand vertically by J
+    U = np.kron(np.ones((J,1)),U)
+    X = np.kron(np.ones((J,1)),X)
+
+    # remove jth row (1st choice)
+    index =  np.identity(J)
+    index = (index == 0).reshape((J^2,1),order='F')
+    U = U[index,:]
+    X  =X[index,:,:]
+
+    # softmax, multiply by X and sum
+    Prob = softmax(U)
+    XProb = (X*Prob).reshape((J-1,J,n//J,k),order='F').sum(axis=0)\
+                    .reshape((n,k),order='F')
+
+    return XProb    
+
+
+def MixedLogitMoment2(X,Zeta,nu,J,k,ro,nuPosition,jChosenShare):
+    
+    # shape
+    n,k = X.shape
+
+    # unpack theta 
+    betaBar, betaO, betaU = unpackParameters(theta,k,ro,nuPosition)
+
+    # random coefficients
+    beta = np.ones((n,k))*betaBar.T + Zeta @ (betaO.T) +\
+           nu*(np.ones((n,k))*betaU.T)
+
+    
 
 def unpackParameters(theta,k,ro,nuPosition):
     betaBar = theta[:k,:].reshape((k,1))
