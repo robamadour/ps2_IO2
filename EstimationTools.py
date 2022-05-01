@@ -8,6 +8,8 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 import HWDataProcessing as dp
 from scipy.optimize import fmin_bfgs
+import warnings
+
 
 class ModelSpecification():
     pass
@@ -110,6 +112,25 @@ class Model:
                 estimates["s.e."] = self.se
 
         return estimates
+    
+    def estimateElasticities(self):
+        modelType = self.type
+        match modelType:
+            case 'logit':
+                self.elasticities = self.getElasticityLogit()
+            case 'mixed_logit':
+                self.elasticities = self.getElasticitiesMixedLogit(1e-6)
+        
+
+    def reportElasticities(self):
+        """Report estimated elasticities."""
+
+        elasticities = self.elasticities
+
+        table = pd.DataFrame({'product quantity' : 1+np.arange(self.J)})
+        for j in range(self.J):
+            table["p_"+str(1+j)] = elasticities[:,j]
+        return table 
                 
 
     
@@ -153,11 +174,12 @@ class Model:
 
         return(step2opt,se)
 
-    def getElasticityLogit(self,theta):
+    def getElasticityLogit(self):
         """Compute elasticity in the Logit model. This command has to be runned 
         after fitting the model."""
 
         # Define  matrices
+        theta = self.estimates
         price =  self.pName
         regressors =  self.xName + [self.pName]
         X = self.data[regressors].to_numpy()
@@ -176,6 +198,94 @@ class Model:
         for j in range(J):
             elasticities[j,j] = ownPE[j]
         
+        return elasticities
+
+    def getComputationMatrices(self):
+
+        nuPosition = (np.array(self.nu) == 1)
+        useM2 = self.useM2
+        secondChoice = self.secondChoice # whether to use second-choice moments
+        xzPairs = self.XZetaInter  # interactions for first-choice moments
+        x1x2Charac = self.X1X2Inter  # interactions for second-choice moments
+        data = self.data.copy()
+
+        # share of consumers that chose product j 
+        jChosenCount = self.data[[self.yName,"product"]]\
+                        .groupby(by="product").sum().to_numpy()
+        jChosenShare = jChosenCount/sum(jChosenCount)
+        
+        # Define  matrices X, Z , Zeta, Y
+        regressors =  self.xName + [self.pName]
+        consumerAttr = self.zName
+        unobsConsAttr = self.unobsNames
+
+        X = self.data[regressors].to_numpy()    # product characteristics
+        Zeta = self.data[consumerAttr].to_numpy() # observed consumer attributes
+        J = self.J  # number of products
+        nXZpairs = len(xzPairs)
+        XZetaNames = ["XZeta_" + str(s)  for s in range(nXZpairs)]
+        for i in range(nXZpairs):
+            varName = XZetaNames[i]
+            Xvar = regressors[xzPairs[i][0]]
+            Zetavar = consumerAttr[xzPairs[i][1]]
+            data[varName] = data[Xvar]*data[Zetavar]
+        XZeta  = data[XZetaNames].to_numpy()
+
+        ro = Zeta.shape[1]
+        
+        MCSample = self.MCSample
+
+        NurAll = MCSample[unobsConsAttr].to_numpy()
+        assert MCSample.shape[0]>=X.shape[0]
+        nu    = NurAll[:X.shape[0],:]
+
+        price_index = X.shape[1]-1
+
+        return X, Zeta, XZeta, nu, J, ro, nuPosition, price_index
+
+    def getElasticitiesMixedLogit(self,d):
+        
+        theta = self.estimates
+        X, Zeta, XZeta, nu, J, ro, nuPosition, price_index = self.getComputationMatrices()
+
+        # shape
+        n,k = X.shape
+        ni = n//J # number of consumers
+        nXZeta = XZeta.shape[1]
+        
+        # unpack theta 
+        betaBar, betaO, betaU = unpackParameters(theta,k,ro,nuPosition)
+
+        # random coefficients
+        beta = np.ones((n,k))*betaBar.T + Zeta @ (betaO.T) +\
+            nu*(np.ones((n,k))*betaU.T)
+        
+        # Get prob. of buying product j
+        U = (X*beta).sum(axis=1).reshape((J,ni),order='F')
+        Ypred = softmax(U).reshape((n,1),order='F')
+
+        # get price
+        p = np.expand_dims(X[:,price_index],axis=1)
+
+        # elasticity matrix
+        elasticities = np.zeros([J,J])
+
+        for j in range(J):
+            # change in price
+            dp = np.zeros([J,1])
+            dp[j,:] = d
+            pj = p + np.kron(np.ones((ni,1)),dp)
+            Xj = np.copy(X)
+            Xj[:,price_index] = pj.reshape((n,))
+            Uj = (Xj*beta).sum(axis=1).reshape((J,ni),order='F')
+            Yj = softmax(Uj).reshape((n,1),order='F')
+
+            # compute elasticity wrt price pj
+            ej = ((Yj-Ypred)/d)*p/Ypred
+
+            # average across consumers and store            
+            elasticities[:,j] = ej.reshape((J,ni),order='F').mean(axis=1)
+
         return elasticities
     
     def fitMixedLogit(self):
@@ -206,12 +316,12 @@ class Model:
 
 
         # restrict data to chosen products as first choice
-        dataChosen = self.data[self.data[self.yName] == 1]
+        dataChosen = self.data[self.data[self.yName] == 1].copy()
 
         # restrict data to chosen products and info about second choice
         dataSecondChoice = self.data[(~ self.data[self.y2Name].isnull()) &
                            ((self.data[self.yName]==1) |
-                           (self.data[self.y2Name]==1))]
+                           (self.data[self.y2Name]==1))].copy()
         
         # consumers for whom there is second choice data
         SecondData = self.data[(~ self.data[self.y2Name].isnull())]
@@ -237,6 +347,9 @@ class Model:
         nMoment2 = nXZpairs
         nMoment3 = nX1X2pairs
         nMoments = nMoment1 + nMoment2 + nMoment3 # total number of moments
+
+        assert nMoments>=nParameters, "Model is underindentified"
+
         ns = self.ns
         nr = self.nr 
         
@@ -245,7 +358,7 @@ class Model:
         for i in range(nXZpairs):
             varName = XZetaNames[i]
             Xvar = regressors[xzPairs[i][0]]
-            Zetavar = regressors[xzPairs[i][1]]
+            Zetavar = consumerAttr[xzPairs[i][1]]
             data[varName] = data[Xvar]*data[Zetavar]
             dataChosen[varName] = dataChosen[Xvar]*dataChosen[Zetavar]
             MCSample[varName] = MCSample[Xvar]*MCSample[Zetavar]
@@ -343,7 +456,7 @@ class Model:
         W = np.identity(nMoments)
 
         # initialize iterations
-        global iteration, lastvalue, functionCount
+        global iteration, lastvalue, functionCount, lastBetaO, lastBetaBar
         iteration = 0
         lastValue = 0
         functionCount = 0
@@ -366,6 +479,7 @@ class Model:
         moment_variance = sampleVar + simulationVar
 
         # set W = inv(variance)
+        #W2 = np.diag(inv(moment_variance))
         W2 = inv(moment_variance)
 
         # second step
@@ -452,7 +566,7 @@ def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
     """Compute GMM obj. function, given data (X,Y,Z,Zeta,Nu) and parameters theta.
     Mixed Logit model with individual level data."""
     
-    global lastValue, functionCount # used in message printing
+    global lastValue, functionCount, lastBetaBar, lastBetaO # used in message printing
 
     # shape
     n,k = X.shape
@@ -480,9 +594,7 @@ def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
     if useM2:
         M2 = XZeta*Ypred    # moments
         # weighted mean over j
-        G2 =  (M2.reshape((J,ni,nXZeta),order='F').mean(axis=1)/
-                Ypred.reshape((J,ni,1),order='F').mean(axis=1)*
-                jChosenShare).sum(axis=0)    # avg. moments
+        G2 =  (M2.reshape((J,ni,nXZeta),order='F').mean(axis=1)).sum(axis=0)    # avg. moments
         G2 = np.expand_dims(G2,axis=1) # make it a vector
     else:
         G2 = []
@@ -493,9 +605,7 @@ def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
         X2Prob2 = secondChoiceXP(X12,U,n,J,k2)
         M3 = (X12*X2Prob2)*Ypred    # moments
         # weighted mean over j
-        G3 =  (M3.reshape((J,ni,k2),order='F').mean(axis=1)/
-                np.expand_dims(Ypred.reshape((J,ni),order='F').mean(axis=1),axis=1)*
-                jChosenShare).sum(axis=0)   # avg. moments
+        G3 =  (M3.reshape((J,ni,k2),order='F').mean(axis=1)).sum(axis=0)   # avg. moments
         G3 = np.expand_dims(G3,axis=1) # make it a vector
     else:
         G3 = []
@@ -513,14 +623,25 @@ def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
     # compute difference between sample and model moments
     Gd = sampleG - G
 
-    if np.isnan(Gd).any():
-        pass
+    #if functionCount//5 == 0:
+     #   print(str((Gd/np.expand_dims(np.sqrt(np.diag(W)),axis=1)).reshape((1,Gd.shape[0]))))
+        #print(str(betaBar))
+        #print(str(betaO))
+
+    
+
+    #assert ~np.isnan(Gd).any(), "Moments contain NaN"
 
     # Compute objective (J function)
     Obj = ni * (Gd.T @ W @ Gd)
     
+    if np.isnan(Gd).any():
+        Obj = lastValue*2
+        warnings.warn("Warning: found NaN in moments")
 
     lastValue = Obj
+    #lastBetaBar = betaBar
+    #lastBetaO = betaO
     functionCount += 1
 
     if not out:
@@ -635,7 +756,7 @@ def computeDerivativeMomentMixedLogit(d,theta,X,Zeta,XZeta,X12,nu,
     for i in range(k):
 
         # get values in theta_i + d
-        theta_i = theta
+        theta_i = theta.copy()
         theta_i[i] = theta[i] + d
         obj,g_i =  MixedLogitGmmObj(theta_i,X,Zeta,XZeta,X12,nu,
                       J,k,ro,nuPosition,jChosenShare,
@@ -667,3 +788,11 @@ def computeSimulationVariance(theta,j,k,ro,nuPosition,jChosenShare,nMoments,ns,n
     simulationVar = np.cov(momentSimulations.T)
 
     return simulationVar
+
+
+
+
+
+    
+
+

@@ -22,21 +22,21 @@ modelSpec.i = "buyerid" # consumer identifier
 modelSpec.y = "Chosen" # choice variable
 modelSpec.y2 = "SecondChoice" # choice variable
 modelSpec.x = ["mint","white","fluoride","kids"]  # product characteristics
-modelSpec.p = "priceperpack"  # product price
-modelSpec.zeta = ["inc","purchase_InStore",  # obs. consumer attributes
-                   "ed_MoreCollege"]
+modelSpec.p = "priceperoz"  # product price
+# obs. consumer attributes
+modelSpec.zeta = []  
+                   
 # Second moment interactions: choose which product characteristics (X) and 
 # consumer attributes (zeta) to interact  to form first-choice moments
 # It must be defined as a list of index pairs [X,zeta]
-modelSpec.XZetaInter = [[4,0],[4,1],  # X=4(=len(x)) -> price; zeta=0 -> income 
-                        [4,2],[0,0],[0,1],[0,2],
-                        [1,0],[1,1],[1,2],
-                        [2,0],[2,1],[2,2],
-                        [3,0],[3,1],[3,2]]
+# Example: X=4(=len(x)) -> price; zeta=0 -> income
+modelSpec.XZetaInter = []
+
 # Third moment interactions: choose which product characteristics of first- and
 # second-choice to interact to form second-choice momentes
 # It must be defined as a list of indexes
-modelSpec.X1X2Inter = [] #X=4 -> interact price
+# ExampleX=4 -> interact price
+modelSpec.X1X2Inter = [] 
 
 # unobs. consumer attributes. It is a kx1 vector, where k = len([X,p]), or 0s 
 # and 1s. A 1 in entry k indicates that product characteristic k is interacted with
@@ -57,3 +57,7 @@ mixedLogitMod = Model(modelSpec)
 mixedLogitMod.fit()
 res = mixedLogitMod.reportEstimates()
 print(res)
+
+mixedLogitMod.estimateElasticities()
+elasticities = mixedLogitMod.reportElasticities()
+print(elasticities)
