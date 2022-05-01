@@ -15,7 +15,7 @@ data = dp.CleanDataSet(data)
 # Mixed logit estimation ######################################################
 # Model specification
 modelSpec = ModelSpecification()
-modelSpec.type = 'logit'
+modelSpec.type = 'mixed_logit' # two options: logit, mixed_logit
 modelSpec.data = data
 modelSpec.J = 10     # number of products
 modelSpec.i = "buyerid" # consumer identifier
@@ -40,17 +40,17 @@ modelSpec.X1X2Inter = [4] #X=4 -> interact price
 # an unobserved consumer attribute.
 modelSpec.nu = np.array([1,1,1,1,0])
 modelSpec.ns = 1000   # number of draws for Monte-Carlo integration
-modelSpec.nr = 5   # number of draws for Monte-Carlo integration
+modelSpec.nr = 50    # number of resamplings needed to compute variance
 modelSpec.seed = 1984 # seed for random number generation
 
 modelSpec.secondChoice = True # Whether second choice moments are used in estimation
 modelSpec.brands = "brandid"      # brand name variable
 
 # Model instance creation
-logitMod = Model(modelSpec)
+mixedLogitMod = Model(modelSpec)
 
 
 # Estimation and results
-logitMod.fit()
-res = logitMod.reportEstimates()
+mixedLogitMod.fit()
+res = mixedLogitMod.reportEstimates()
 print(res)
