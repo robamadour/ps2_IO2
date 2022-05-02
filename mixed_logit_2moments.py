@@ -45,7 +45,7 @@ modelSpec.X1X2Inter = []
 # unobs. consumer attributes. It is a kx1 vector, where k = len([X,p]), of 0s 
 # and 1s. A 1 in entry k indicates that product characteristic k is interacted with
 # an unobserved consumer attribute.
-modelSpec.nu = np.array([0,0,0,0,1])
+modelSpec.nu = np.array([])
 modelSpec.ns = 1000   # number of draws for Monte-Carlo integration
 modelSpec.nr = 50    # number of resamplings needed to compute variance
 modelSpec.seed = 1984 # seed for random number generation
