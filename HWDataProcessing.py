@@ -9,6 +9,9 @@ def CleanDataSet(data):
     data.replace({"mint": dictYes,"white": dictYes,"fluoride": dictYes, 
                   "kids": dictYes},inplace=True)
 
+    # Add intercept
+    data["intercept"] = 1
+
     # Normalization
     data["sizeNorm"] = np.divide(data["size"]-np.min(data["size"]),
                                     np.max(data["size"])-np.min(data["size"]))
@@ -18,7 +21,7 @@ def CleanDataSet(data):
     uniqueProducts  = data.groupby(['brandid','mint','white','fluoride','kids'])\
                           .size().reset_index().rename(columns={0:'count'})
     
-    data["product"] = 0
+    data["productId"] = 0
     for i in range(len(uniqueProducts)):
         index = ((data.brandid == uniqueProducts.iloc[i,0])      & 
                 (data.mint == uniqueProducts.iloc[i,1])          &
@@ -33,6 +36,7 @@ def CleanDataSet(data):
     data = data.join(pd.get_dummies(data.gender,prefix="gen"))
     data = data.join(pd.get_dummies(data.purchase,prefix="purchase"))
     data = data.join(pd.get_dummies(data.brandid,prefix="brand"))
+    data = data.join(pd.get_dummies(data.productId,prefix="prodId"))
 
     # Rename some columns
     data = data.rename({'ed_High School':'ed_HighSchool',

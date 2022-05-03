@@ -134,7 +134,7 @@ class Model:
             case 'logit':
                 self.elasticities = self.getElasticityLogit()
             case 'mixed_logit':
-                self.elasticities = self.getElasticitiesMixedLogit(1e-6)
+                self.elasticities = self.getElasticitiesMixedLogit(1e-12)
         
 
     def reportElasticities(self):
@@ -228,8 +228,8 @@ class Model:
         data = self.data.copy()
 
         # share of consumers that chose product j 
-        jChosenCount = self.data[[self.yName,"product"]]\
-                        .groupby(by="product").sum().to_numpy()
+        jChosenCount = self.data[[self.yName,"productId"]]\
+                        .groupby(by="productId").sum().to_numpy()
         
         # Define  matrices X, Z , Zeta, Y
         regressors =  self.xName + [self.pName]
@@ -319,8 +319,8 @@ class Model:
         M2M3short = self.M2M3short
 
         # share of consumers that chose product j 
-        jChosenCount = self.data[[self.yName,"product"]]\
-                        .groupby(by="product").sum().to_numpy()
+        jChosenCount = self.data[[self.yName,"productId"]]\
+                        .groupby(by="productId").sum().to_numpy()
         jChosenShare = jChosenCount/sum(jChosenCount)
         
         # Define  matrices X, Z , Zeta, Y
@@ -502,7 +502,7 @@ class Model:
         D = computeDerivativeMomentMixedLogit(d,step1opt,Xr,Zetar,XZetar,X12r,Nur,
                       j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice,W)
-        VarCov = inv(D.T @ W @ D)/nConsumers
+        VarCov = np.linalg.lstsq(D.T @ W @ D,np.eye(nParameters))[0]/nConsumers
         # se
         seStep1 = np.sqrt(np.diag(VarCov))
         
@@ -510,7 +510,7 @@ class Model:
         moment_variance = sampleVar + simulationVar
 
         # set W = inv(variance)
-        W2 = inv(moment_variance)
+        W2 = np.linalg.lstsq(moment_variance,np.eye(nMoments))[0]
 
         
 
@@ -523,7 +523,7 @@ class Model:
                 
         # compute s.e.
         # Get numerical derivative
-        d = 1e-6 
+        d = 1e-12
         D = computeDerivativeMomentMixedLogit(d,step2opt,Xr,Zetar,XZetar,X12r,Nur,
                       j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice,W2)
@@ -534,10 +534,14 @@ class Model:
                             XrAll,ZetarAll,NurAll,XZetarAll,X12rAll,
                             sampleG,useM2,secondChoice,W2)
         moment_variance = sampleVar + simulationVar
-        W3 = inv(moment_variance)
+        W3 = np.linalg.lstsq(moment_variance,np.eye(nMoments))[0]
         
         # get variance covariance matrix
-        VarCov = inv(D.T @ W3 @ D)/nConsumers
+        # precondition method
+        A = D.T @ W3 @ D
+        P = np.diag(np.diag(A))
+        y = np.linalg.lstsq(A@inv(P),np.eye(nParameters))[0]
+        VarCov = np.linalg.lstsq(P,y)[0]/nConsumers
         # se
         seStep2 = np.sqrt(np.diag(VarCov))
 

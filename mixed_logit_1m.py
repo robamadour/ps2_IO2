@@ -66,7 +66,7 @@ modelSpec.seed = 1984 # seed for random number generation
 
 modelSpec.secondChoice = False # Whether second choice moments are used in estimation
 modelSpec.brands = "brandid"      # brand name variable
-modelSpec.M2M3short = True  # whether moments M2 and M3 are computed
+modelSpec.M2M3short = False  # whether moments M2 and M3 are computed
                             # using short formula or not
 
 # Model instance creation
@@ -84,7 +84,7 @@ elasticities = mixedLogitMod.reportElasticities()
 print(elasticities)
 
 # save to excel file
-file = 'outputs/mixed_logit_1m.xlsx'
+file = 'outputs/m_long_peroz_rcPrice.xlsx'
 sheet_estimates = 'estimates'
 sheet_estimates_s1 = 'estimates_step1'
 sheet_elasticities = 'elasticities'

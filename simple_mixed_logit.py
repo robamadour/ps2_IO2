@@ -22,7 +22,10 @@ modelSpec.i = "buyerid" # consumer identifier
 modelSpec.y = "Chosen" # choice variable
 modelSpec.y2 = "SecondChoice" # choice variable
 # product characteristics
-modelSpec.x = ["brand_Colgate","brand_Crest","brand_Sensodyne",
+productFixedEffects = ['prodId_1','prodId_2', 'prodId_3', 'prodId_4',
+        'prodId_5', 'prodId_6', 'prodId_7','prodId_8', 'prodId_9'] 
+modelSpec.x = ["brand_Colgate","brand_Crest",
+                "brand_Sensodyne",
                 "mint","white","fluoride","kids",
                 "sizeNorm","discount","familypack"]  
 modelSpec.p = "priceperoz"  # product price
