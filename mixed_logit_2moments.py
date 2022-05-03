@@ -28,21 +28,29 @@ modelSpec.x = ["brand_Colgate","brand_Crest","brand_Sensodyne",
 modelSpec.p = "priceperoz"  # product price
 # obs. consumer attributes
 modelSpec.zeta = ["inc","ed_MoreCollege","purchase_InStore"]  
+# what consumer and product characteristics to interact to form random coefficients
+# list of pairs [X,zeta]
+indexP = len(modelSpec.x)
+modelSpec.XZetaRC = [
+    [indexP,0], # price and income
+    [indexP,1]  # price and ed_MoreCollege
+               ]
                    
 # Second moment interactions: choose which product characteristics (X) and 
 # consumer attributes (zeta) to interact  to form first-choice moments
 # It must be defined as a list of index pairs [X,zeta]
 # Example: X=4(=len(x)) -> price; zeta=0 -> income
 # get as cartersian product
-nX = len(modelSpec.x) +1
-nZeta = len(modelSpec.zeta)
-x = np.arange(nX)
-zeta = np.arange(nZeta)
-if nZeta>0:
-    modelSpec.XZetaInter = np.transpose([np.tile(x, len(zeta)),
-                                np.repeat(zeta, len(x))]).tolist()
-else:
-    modelSpec.XZetaInter = []
+# nX = len(modelSpec.x) +1
+# nZeta = len(modelSpec.zeta)
+# x = np.arange(nX)
+# zeta = np.arange(nZeta)
+# if nZeta>0:
+#     modelSpec.XZetaInter = np.transpose([np.tile(x, len(zeta)),
+#                                 np.repeat(zeta, len(x))]).tolist()
+# else:
+#     modelSpec.XZetaInter = []
+modelSpec.XZetaInter = [[indexP,0],[indexP,1]]
 
 # Third moment interactions: choose which product characteristics of first- and
 # second-choice to interact to form second-choice momentes

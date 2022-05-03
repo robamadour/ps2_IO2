@@ -4,6 +4,7 @@ from matplotlib.pyplot import axis
 import numpy as np
 import pandas as pd
 from numpy.linalg import inv
+from psutil import ZombieProcess
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 import HWDataProcessing as dp
@@ -38,6 +39,9 @@ class Model:
         self.nr = spec.nr # number of resamplings needed to compute variance
         self.secondChoice = spec.secondChoice # whether to use second choice moments
         self.seed = spec.seed  # seed for random number generation
+        # RC interactions
+        self.XZetaRCPairs = spec.XZetaRC 
+        self.XZetaRC = pairsToIndex(spec.XZetaRC,len(self.xName)+1,len(self.zName))  
         self.XZetaInter = spec.XZetaInter  # first-choice interactions
         self.X1X2Inter =  spec.X1X2Inter   # first- and second-choice interaction
 
@@ -95,14 +99,15 @@ class Model:
                 k = len(regressors)
                 ro = len(consumerAttr)
                 ru = int(sum(self.nu))
-                nParameters = k + k*ro + ru
+                nRC = len(self.XZetaRC)
+                nParameters = k + nRC + ru
 
                 XZNames = []
-                if len(consumerAttr):
-                    for i in range(ro):
-                        for j in range(k):
-                            thisVar = regressors[j] + '_' + consumerAttr[i]
-                            XZNames = XZNames + [thisVar]
+                pairs = self.XZetaRCPairs
+                if len(consumerAttr)>0:
+                    for i in range(nRC):                        
+                        thisVar = regressors[pairs[i][0]] + '_' + consumerAttr[pairs[i][1]]
+                        XZNames = XZNames + [thisVar]
                 
                 unobsNames = []
                 if len(nuPosition) > 0:
@@ -110,7 +115,7 @@ class Model:
                         if nuPosition[i] == 1:
                             unobsNames = unobsNames + [regressors[i]]
 
-                paramName = ["betaBar"]*k + ["betaO"]*(k*ro) + ["betaU"]*ru
+                paramName = ["betaBar"]*k + ["betaO"]*(nRC) + ["betaU"]*ru
                 varName = regressors + XZNames + unobsNames
 
                 estimates = pd.DataFrame()
@@ -216,16 +221,13 @@ class Model:
     def getComputationMatrices(self):
 
         nuPosition = (np.array(self.nu) == 1)
-        useM2 = self.useM2
-        secondChoice = self.secondChoice # whether to use second-choice moments
+        XZetaRC = self.XZetaRC
         xzPairs = self.XZetaInter  # interactions for first-choice moments
-        x1x2Charac = self.X1X2Inter  # interactions for second-choice moments
         data = self.data.copy()
 
         # share of consumers that chose product j 
         jChosenCount = self.data[[self.yName,"product"]]\
                         .groupby(by="product").sum().to_numpy()
-        jChosenShare = jChosenCount/sum(jChosenCount)
         
         # Define  matrices X, Z , Zeta, Y
         regressors =  self.xName + [self.pName]
@@ -254,12 +256,12 @@ class Model:
 
         price_index = X.shape[1]-1
 
-        return X, Zeta, XZeta, nu, J, ro, nuPosition, price_index
+        return X, Zeta, XZeta, nu, J, ro, nuPosition,XZetaRC, price_index
 
     def getElasticitiesMixedLogit(self,d):
         
         theta = self.estimates
-        X, Zeta, XZeta, nu, J, ro, nuPosition, price_index = self.getComputationMatrices()
+        X, Zeta, XZeta, nu, J, ro, nuPosition,XZetaRC, price_index = self.getComputationMatrices()
 
         # shape
         n,k = X.shape
@@ -267,7 +269,7 @@ class Model:
         nXZeta = XZeta.shape[1]
         
         # unpack theta 
-        betaBar, betaO, betaU = unpackParameters(theta,k,ro,nuPosition)
+        betaBar, betaO, betaU = unpackParameters(theta,k,ro,nuPosition,XZetaRC)
 
         # random coefficients
         beta = np.ones((n,k))*betaBar.T + Zeta @ (betaO.T) +\
@@ -306,8 +308,8 @@ class Model:
 
         # Specification
         data = self.data.copy()
-        unobsHet = self.unobsHet # whether to model unboserved heterogeneity
         nuPosition = (np.array(self.nu) == 1)
+        XZetaRC = self.XZetaRC
         useM2 = self.useM2
         secondChoice = self.secondChoice # whether to use second-choice moments
         xzPairs = self.XZetaInter  # interactions for first-choice moments
@@ -353,9 +355,10 @@ class Model:
         nConsumers = n//j # number of consumers
         ro = Zeta.shape[1] # number of observed consumer attributes
         ru = int(sum(self.nu))   # number of unobserved consumer attributes
+        nRC = len(XZetaRC)  # number of RC with observed attributes
         nXZpairs = len(xzPairs) # number of first-choice moments
         nX1X2pairs = len(x1x2Charac) # number of first-choice moments
-        nParameters = k + k*ro + ru
+        nParameters = k + nRC + ru
         nMoment1 = k
         nMoment2 = nXZpairs
         nMoment3 = nX1X2pairs
@@ -479,21 +482,22 @@ class Model:
         # Minimization
         # first step
         out = False
-        args = (Xr, Zetar,XZetar,X12r,Nur,j,k,ro,nuPosition,jChosenShare,
+        args = (Xr, Zetar,XZetar,X12r,Nur,j,k,ro,nuPosition,XZetaRC,jChosenShare,
                 sampleG,useM2,secondChoice,W,out)
         step1opt = fmin_bfgs(MixedLogitGmmObj, theta0, args=args,
                               callback=iter_print)
 
         # Compute variance-covariance matrix
         # simulation variance
-        simulationVar = computeSimulationVariance(step1opt,j,k,ro,nuPosition,jChosenShare,nMoments,ns,nr,
+        simulationVar = computeSimulationVariance(step1opt,j,k,ro,nuPosition,XZetaRC,
+                            jChosenShare,nMoments,ns,nr,
                             XrAll,ZetarAll,NurAll,XZetarAll,X12rAll,
                             sampleG,useM2,secondChoice,W)
 
         # compute s.e. of first step
         d = 1e-6 
         D = computeDerivativeMomentMixedLogit(d,step1opt,Xr,Zetar,XZetar,X12r,Nur,
-                      j,k,ro,nuPosition,jChosenShare,
+                      j,k,ro,nuPosition,XZetaRC,jChosenShare,
                       sampleG, useM2,secondChoice,W)
         VarCov = inv(D.T @ W @ D)/nConsumers
         # se
@@ -508,7 +512,7 @@ class Model:
         
 
         # second step
-        args = (Xr, Zetar,XZetar,X12r,Nur,j,k,ro,nuPosition,jChosenShare,
+        args = (Xr, Zetar,XZetar,X12r,Nur,j,k,ro,nuPosition,XZetaRC,jChosenShare,
                 sampleG,useM2,secondChoice,W2,out)
         step2opt = fmin_bfgs(MixedLogitGmmObj, step1opt, args=args,
                               callback=iter_print)
@@ -517,10 +521,11 @@ class Model:
         # Get numerical derivative
         d = 1e-6 
         D = computeDerivativeMomentMixedLogit(d,step2opt,Xr,Zetar,XZetar,X12r,Nur,
-                      j,k,ro,nuPosition,jChosenShare,
+                      j,k,ro,nuPosition,XZetaRC,jChosenShare,
                       sampleG, useM2,secondChoice,W2)
         
         simulationVar = computeSimulationVariance(step2opt,j,k,ro,nuPosition,
+                            XZetaRC,
                             jChosenShare,nMoments,ns,nr,
                             XrAll,ZetarAll,NurAll,XZetarAll,X12rAll,
                             sampleG,useM2,secondChoice,W2)
@@ -586,7 +591,7 @@ def LogitGetFittedProb(theta,X,Y,J):
     return Ypred
     
 def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
-                      J,k,ro,nuPosition,jChosenShare,
+                      J,k,ro,nuPosition,XZetaRC,jChosenShare,
                       sampleG, useM2,secondChoice,W, out):
     """Compute GMM obj. function, given data (X,Y,Z,Zeta,Nu) and parameters theta.
     Mixed Logit model with individual level data."""
@@ -599,7 +604,7 @@ def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
     nXZeta = XZeta.shape[1]
     
     # unpack theta 
-    betaBar, betaO, betaU = unpackParameters(theta,k,ro,nuPosition)
+    betaBar, betaO, betaU = unpackParameters(theta,k,ro,nuPosition,XZetaRC)
 
     # random coefficients
     beta = np.ones((n,k))*betaBar.T + Zeta @ (betaO.T) +\
@@ -700,10 +705,16 @@ def secondChoiceXP(X,U,n,J,k):
     return XProb    
     
 
-def unpackParameters(theta,k,ro,nuPosition):
+def unpackParameters(theta,k,ro,nuPosition,XZetaRC):
+
+    nRC = len(XZetaRC)
     betaBar = theta[:k].reshape((k,1))
-    betaO = theta[k:(k+k*ro)].reshape((k,ro),order='F')
-    betaUp = theta[(k+k*ro):]
+
+    betaO = np.zeros((k*ro,)) 
+    betaO[XZetaRC] = theta[k:(k+nRC)]
+    betaO = betaO.reshape((k,ro),order='F')
+
+    betaUp = theta[(k+nRC):]
     betaU = np.zeros((k,1))
     betaU[nuPosition,:] = np.expand_dims(betaUp,axis=1)
     
@@ -761,7 +772,7 @@ def computeSampleVariance(M1,M2,M3,useM2,secondChoice, index):
     return Var
 
 def computeDerivativeMomentMixedLogit(d,theta,X,Zeta,XZeta,X12,nu,
-                      J,k,ro,nuPosition,jChosenShare,
+                      J,k,ro,nuPosition,XZetaRC,jChosenShare,
                       sampleG, useM2,secondChoice,W):
     """Compute the expected moment derivative in the mixed logit model.
     we do so by numerical approximation (finite differences). d is the deviation
@@ -771,7 +782,7 @@ def computeDerivativeMomentMixedLogit(d,theta,X,Zeta,XZeta,X12,nu,
 
     # get central value
     obj, gCentral = MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
-                      J,k,ro,nuPosition,jChosenShare,
+                      J,k,ro,nuPosition,XZetaRC,jChosenShare,
                       sampleG, useM2,secondChoice,W, True)
     m,l = gCentral.shape # numer of moments
 
@@ -784,13 +795,13 @@ def computeDerivativeMomentMixedLogit(d,theta,X,Zeta,XZeta,X12,nu,
         theta_i = theta.copy()
         theta_i[i] = theta[i] + d
         obj,g_i =  MixedLogitGmmObj(theta_i,X,Zeta,XZeta,X12,nu,
-                      J,k,ro,nuPosition,jChosenShare,
+                      J,k,ro,nuPosition,XZetaRC,jChosenShare,
                       sampleG, useM2,secondChoice,W, True)
         D[:,i] = ((g_i-gCentral)/d).T
     
     return D
 
-def computeSimulationVariance(theta,j,k,ro,nuPosition,jChosenShare,nMoments,ns,nr,
+def computeSimulationVariance(theta,j,k,ro,nuPosition,XZetaRC,jChosenShare,nMoments,ns,nr,
                             XrAll,ZetarAll,NurAll,XZetarAll,X12rAll,
                             sampleG,useM2,secondChoice,W):
     """Estimate the variance-covariance of moments due to simulation"""
@@ -807,7 +818,7 @@ def computeSimulationVariance(theta,j,k,ro,nuPosition,jChosenShare,nMoments,ns,n
             X12ri   = []
 
         gg,momentsri = MixedLogitGmmObj(theta,Xri,Zetari,
-                        XZetari,X12ri,Nuri,j,k,ro,nuPosition,jChosenShare,
+                        XZetari,X12ri,Nuri,j,k,ro,nuPosition,XZetaRC,jChosenShare,
                         sampleG, useM2,secondChoice,W, True)
         momentSimulations[ri,:] = momentsri.T
     simulationVar = np.cov(momentSimulations.T)
@@ -815,9 +826,17 @@ def computeSimulationVariance(theta,j,k,ro,nuPosition,jChosenShare,nMoments,ns,n
     return simulationVar
 
 
+def pairsToIndex(pairs,k,r):
 
+    nPairs = len(pairs)
 
+    index = np.zeros((nPairs,),dtype=np.uint64)
+    for i in range(nPairs):
+        entry = pairs[i][1]*k + pairs[i][0]
+        assert entry <k*r, "Index is not valid"
+        index[i] = int(entry)
 
+    return index  
     
 
 
