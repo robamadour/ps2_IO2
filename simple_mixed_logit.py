@@ -28,7 +28,11 @@ modelSpec.x = ["brand_Colgate","brand_Crest","brand_Sensodyne",
 modelSpec.p = "priceperoz"  # product price
 # obs. consumer attributes
 modelSpec.zeta = []  
-                   
+
+# what consumer and product characteristics to interact to form random coefficients
+# list of pairs [X,zeta]
+modelSpec.XZetaRC = []
+
 # Second moment interactions: choose which product characteristics (X) and 
 # consumer attributes (zeta) to interact  to form first-choice moments
 # It must be defined as a list of index pairs [X,zeta]
@@ -60,6 +64,8 @@ modelSpec.seed = 1984 # seed for random number generation
 
 modelSpec.secondChoice = False # Whether second choice moments are used in estimation
 modelSpec.brands = "brandid"      # brand name variable
+modelSpec.M2M3short = False  # whether moments M2 and M3 are computed
+                            # using short formula or not
 
 # Model instance creation
 mixedLogitMod = Model(modelSpec)
@@ -76,11 +82,12 @@ elasticities = mixedLogitMod.reportElasticities()
 print(elasticities)
 
 # save to excel file
-file = 'outputs/mixed_logit_01.xlsx'
+file = 'outputs/sm_long_peroz_01.xlsx'
 sheet_estimates = 'estimates'
 sheet_estimates_s1 = 'estimates_step1'
 sheet_elasticities = 'elasticities'
 
+estimates.to_excel(file,sheet_name=sheet_estimates)
 with pd.ExcelWriter(file,mode='a',if_sheet_exists='replace') as writer:  
     estimates.to_excel(writer,sheet_name=sheet_estimates)
     estimates_s1.to_excel(writer,sheet_name=sheet_estimates_s1)

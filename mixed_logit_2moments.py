@@ -69,6 +69,9 @@ modelSpec.seed = 1984 # seed for random number generation
 modelSpec.secondChoice = False # Whether second choice moments are used in estimation
 modelSpec.brands = "brandid"      # brand name variable
 
+modelSpec.M2M3short = True  # whether moments M2 and M3 are computed
+                            # using short formula or not
+
 # Model instance creation
 mixedLogitMod = Model(modelSpec)
 

@@ -44,6 +44,8 @@ class Model:
         self.XZetaRC = pairsToIndex(spec.XZetaRC,len(self.xName)+1,len(self.zName))  
         self.XZetaInter = spec.XZetaInter  # first-choice interactions
         self.X1X2Inter =  spec.X1X2Inter   # first- and second-choice interaction
+        self.M2M3short =  spec.M2M3short   # whether moments M2 and M3 are computed
+                                           # using short formula or not
 
         # simulate data for MC integration
         if self.type != 'logit':
@@ -314,6 +316,7 @@ class Model:
         secondChoice = self.secondChoice # whether to use second-choice moments
         xzPairs = self.XZetaInter  # interactions for first-choice moments
         x1x2Charac = self.X1X2Inter  # interactions for second-choice moments
+        M2M3short = self.M2M3short
 
         # share of consumers that chose product j 
         jChosenCount = self.data[[self.yName,"product"]]\
@@ -483,21 +486,21 @@ class Model:
         # first step
         out = False
         args = (Xr, Zetar,XZetar,X12r,Nur,j,k,ro,nuPosition,XZetaRC,jChosenShare,
-                sampleG,useM2,secondChoice,W,out)
+                M2M3short,sampleG,useM2,secondChoice,W,out)
         step1opt = fmin_bfgs(MixedLogitGmmObj, theta0, args=args,
                               callback=iter_print)
 
         # Compute variance-covariance matrix
         # simulation variance
         simulationVar = computeSimulationVariance(step1opt,j,k,ro,nuPosition,XZetaRC,
-                            jChosenShare,nMoments,ns,nr,
+                            jChosenShare,M2M3short,nMoments,ns,nr,
                             XrAll,ZetarAll,NurAll,XZetarAll,X12rAll,
                             sampleG,useM2,secondChoice,W)
 
         # compute s.e. of first step
         d = 1e-6 
         D = computeDerivativeMomentMixedLogit(d,step1opt,Xr,Zetar,XZetar,X12r,Nur,
-                      j,k,ro,nuPosition,XZetaRC,jChosenShare,
+                      j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice,W)
         VarCov = inv(D.T @ W @ D)/nConsumers
         # se
@@ -513,6 +516,7 @@ class Model:
 
         # second step
         args = (Xr, Zetar,XZetar,X12r,Nur,j,k,ro,nuPosition,XZetaRC,jChosenShare,
+                M2M3short,
                 sampleG,useM2,secondChoice,W2,out)
         step2opt = fmin_bfgs(MixedLogitGmmObj, step1opt, args=args,
                               callback=iter_print)
@@ -521,12 +525,12 @@ class Model:
         # Get numerical derivative
         d = 1e-6 
         D = computeDerivativeMomentMixedLogit(d,step2opt,Xr,Zetar,XZetar,X12r,Nur,
-                      j,k,ro,nuPosition,XZetaRC,jChosenShare,
+                      j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice,W2)
         
         simulationVar = computeSimulationVariance(step2opt,j,k,ro,nuPosition,
                             XZetaRC,
-                            jChosenShare,nMoments,ns,nr,
+                            jChosenShare,M2M3short,nMoments,ns,nr,
                             XrAll,ZetarAll,NurAll,XZetarAll,X12rAll,
                             sampleG,useM2,secondChoice,W2)
         moment_variance = sampleVar + simulationVar
@@ -591,7 +595,7 @@ def LogitGetFittedProb(theta,X,Y,J):
     return Ypred
     
 def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
-                      J,k,ro,nuPosition,XZetaRC,jChosenShare,
+                      J,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice,W, out):
     """Compute GMM obj. function, given data (X,Y,Z,Zeta,Nu) and parameters theta.
     Mixed Logit model with individual level data."""
@@ -624,7 +628,12 @@ def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
     if useM2:
         M2 = XZeta*Ypred    # moments
         # weighted mean over j
-        G2 =  (M2.reshape((J,ni,nXZeta),order='F').mean(axis=1)).sum(axis=0)    # avg. moments
+        if M2M3short:
+            G2 =  (M2.reshape((J,ni,nXZeta),order='F').mean(axis=1)).sum(axis=0)
+        else:
+            G2 =  (M2.reshape((J,ni,nXZeta),order='F').mean(axis=1)/
+                    Ypred.reshape((J,ni,1),order='F').mean(axis=1)*
+                    jChosenShare).sum(axis=0)
         G2 = np.expand_dims(G2,axis=1) # make it a vector
     else:
         G2 = []
@@ -635,7 +644,12 @@ def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
         X2Prob2 = secondChoiceXP(X12,U,n,J,k2)
         M3 = (X12*X2Prob2)*Ypred    # moments
         # weighted mean over j
-        G3 =  (M3.reshape((J,ni,k2),order='F').mean(axis=1)).sum(axis=0)   # avg. moments
+        if M2M3short:
+            G3 =  (M3.reshape((J,ni,k2),order='F').mean(axis=1)).sum(axis=0)
+        else:
+            G3 =  (M3.reshape((J,ni,k2),order='F').mean(axis=1)/
+                np.expand_dims(Ypred.reshape((J,ni),order='F').mean(axis=1),axis=1)*
+                jChosenShare).sum(axis=0)
         G3 = np.expand_dims(G3,axis=1) # make it a vector
     else:
         G3 = []
@@ -772,7 +786,7 @@ def computeSampleVariance(M1,M2,M3,useM2,secondChoice, index):
     return Var
 
 def computeDerivativeMomentMixedLogit(d,theta,X,Zeta,XZeta,X12,nu,
-                      J,k,ro,nuPosition,XZetaRC,jChosenShare,
+                      J,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice,W):
     """Compute the expected moment derivative in the mixed logit model.
     we do so by numerical approximation (finite differences). d is the deviation
@@ -782,7 +796,7 @@ def computeDerivativeMomentMixedLogit(d,theta,X,Zeta,XZeta,X12,nu,
 
     # get central value
     obj, gCentral = MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
-                      J,k,ro,nuPosition,XZetaRC,jChosenShare,
+                      J,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice,W, True)
     m,l = gCentral.shape # numer of moments
 
@@ -795,13 +809,14 @@ def computeDerivativeMomentMixedLogit(d,theta,X,Zeta,XZeta,X12,nu,
         theta_i = theta.copy()
         theta_i[i] = theta[i] + d
         obj,g_i =  MixedLogitGmmObj(theta_i,X,Zeta,XZeta,X12,nu,
-                      J,k,ro,nuPosition,XZetaRC,jChosenShare,
+                      J,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice,W, True)
         D[:,i] = ((g_i-gCentral)/d).T
     
     return D
 
-def computeSimulationVariance(theta,j,k,ro,nuPosition,XZetaRC,jChosenShare,nMoments,ns,nr,
+def computeSimulationVariance(theta,j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
+                            nMoments,ns,nr,
                             XrAll,ZetarAll,NurAll,XZetarAll,X12rAll,
                             sampleG,useM2,secondChoice,W):
     """Estimate the variance-covariance of moments due to simulation"""
@@ -819,7 +834,7 @@ def computeSimulationVariance(theta,j,k,ro,nuPosition,XZetaRC,jChosenShare,nMome
 
         gg,momentsri = MixedLogitGmmObj(theta,Xri,Zetari,
                         XZetari,X12ri,Nuri,j,k,ro,nuPosition,XZetaRC,jChosenShare,
-                        sampleG, useM2,secondChoice,W, True)
+                        M2M3short,sampleG, useM2,secondChoice,W, True)
         momentSimulations[ri,:] = momentsri.T
     simulationVar = np.cov(momentSimulations.T)
 
