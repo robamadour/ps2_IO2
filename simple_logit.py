@@ -15,7 +15,7 @@ data = dp.CleanDataSet(data)
 # Mixed logit estimation ######################################################
 # Model specification
 modelSpec = ModelSpecification()
-modelSpec.type = 'mixed_logit' # two options: logit, mixed_logit
+modelSpec.type = 'logit' # two options: logit, mixed_logit
 modelSpec.data = data
 modelSpec.J = 10     # number of products
 modelSpec.i = "buyerid" # consumer identifier
@@ -76,7 +76,7 @@ elasticities = mixedLogitMod.reportElasticities()
 print(elasticities)
 
 # save to excel file
-file = 'outputs/mixed_logit_01.xlsx'
+file = 'outputs/simple_logit_01.xlsx'
 sheet_estimates = 'estimates'
 sheet_estimates_s1 = 'estimates_step1'
 sheet_elasticities = 'elasticities'

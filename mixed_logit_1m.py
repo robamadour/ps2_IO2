@@ -53,7 +53,9 @@ modelSpec.X1X2Inter = []
 # unobs. consumer attributes. It is a kx1 vector, where k = len([X,p]), or 0s 
 # and 1s. A 1 in entry k indicates that product characteristic k is interacted with
 # an unobserved consumer attribute.
-modelSpec.nu = np.array([])
+nu = np.zeros((len(modelSpec.x)+1,))
+nu[-1] = 1
+modelSpec.nu = nu
 modelSpec.ns = 1000   # number of draws for Monte-Carlo integration
 modelSpec.nr = 50    # number of resamplings needed to compute variance
 modelSpec.seed = 1984 # seed for random number generation
@@ -76,7 +78,7 @@ elasticities = mixedLogitMod.reportElasticities()
 print(elasticities)
 
 # save to excel file
-file = 'outputs/mixed_logit_01.xlsx'
+file = 'outputs/mixed_logit_1m.xlsx'
 sheet_estimates = 'estimates'
 sheet_estimates_s1 = 'estimates_step1'
 sheet_elasticities = 'elasticities'

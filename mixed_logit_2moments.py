@@ -5,8 +5,6 @@ import EstimationTools as et
 from EstimationTools import ModelSpecification
 from EstimationTools import Model
 
-np.set_printoptions(precision=3)
-
 # Load data
 dataFile = "data/Shining32.csv"
 data = pd.read_csv(dataFile)
@@ -23,7 +21,10 @@ modelSpec.J = 10     # number of products
 modelSpec.i = "buyerid" # consumer identifier
 modelSpec.y = "Chosen" # choice variable
 modelSpec.y2 = "SecondChoice" # choice variable
-modelSpec.x = ["mint","white","fluoride","kids"]  # product characteristics
+# product characteristics
+modelSpec.x = ["brand_Colgate","brand_Crest","brand_Sensodyne",
+                "mint","white","fluoride","kids",
+                "sizeNorm","discount","familypack"]  
 modelSpec.p = "priceperoz"  # product price
 # obs. consumer attributes
 modelSpec.zeta = ["inc","ed_MoreCollege","purchase_InStore"]  
@@ -32,9 +33,16 @@ modelSpec.zeta = ["inc","ed_MoreCollege","purchase_InStore"]
 # consumer attributes (zeta) to interact  to form first-choice moments
 # It must be defined as a list of index pairs [X,zeta]
 # Example: X=4(=len(x)) -> price; zeta=0 -> income
-modelSpec.XZetaInter = [[0,0],[1,0],[2,0],[3,0],[4,0],
-                        [0,1],[1,1],[2,1],[3,1],[4,1],
-                        [0,2],[1,2],[2,2],[3,2],[4,2]]
+# get as cartersian product
+nX = len(modelSpec.x) +1
+nZeta = len(modelSpec.zeta)
+x = np.arange(nX)
+zeta = np.arange(nZeta)
+if nZeta>0:
+    modelSpec.XZetaInter = np.transpose([np.tile(x, len(zeta)),
+                                np.repeat(zeta, len(x))]).tolist()
+else:
+    modelSpec.XZetaInter = []
 
 # Third moment interactions: choose which product characteristics of first- and
 # second-choice to interact to form second-choice momentes
@@ -42,7 +50,7 @@ modelSpec.XZetaInter = [[0,0],[1,0],[2,0],[3,0],[4,0],
 # ExampleX=4 -> interact price
 modelSpec.X1X2Inter = [] 
 
-# unobs. consumer attributes. It is a kx1 vector, where k = len([X,p]), of 0s 
+# unobs. consumer attributes. It is a kx1 vector, where k = len([X,p]), or 0s 
 # and 1s. A 1 in entry k indicates that product characteristic k is interacted with
 # an unobserved consumer attribute.
 modelSpec.nu = np.array([])
@@ -59,9 +67,22 @@ mixedLogitMod = Model(modelSpec)
 
 # Estimation and results
 mixedLogitMod.fit()
-res = mixedLogitMod.reportEstimates()
-print(res)
+estimates = mixedLogitMod.reportEstimates('step2')
+estimates_s1 = mixedLogitMod.reportEstimates('step1')
+print(estimates)
 
 mixedLogitMod.estimateElasticities()
 elasticities = mixedLogitMod.reportElasticities()
 print(elasticities)
+
+# save to excel file
+file = 'outputs/mixed_logit_2moments.xlsx'
+sheet_estimates = 'estimates'
+sheet_estimates_s1 = 'estimates_step1'
+sheet_elasticities = 'elasticities'
+
+estimates.to_excel(file,sheet_name=sheet_estimates)
+with pd.ExcelWriter(file,mode='a',if_sheet_exists='replace') as writer:  
+    estimates.to_excel(writer,sheet_name=sheet_estimates)
+    estimates_s1.to_excel(writer,sheet_name=sheet_estimates_s1)
+    elasticities.to_excel(writer,sheet_name=sheet_elasticities)

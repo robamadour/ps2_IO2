@@ -62,20 +62,28 @@ class Model:
         modelType = self.type
         match modelType:
             case 'logit':
-                self.estimates, self.se = self.fitLogit()
+                self.estimatesS1, self.seS1,self.estimates, self.se = self.fitLogit()
             case 'mixed_logit':
-                self.estimates, self.se = self.fitMixedLogit()
+                self.estimatesS1, self.seS1,self.estimates, self.se = self.fitMixedLogit()
         
-    def reportEstimates(self):
+    def reportEstimates(self,step = 'step2'):
         """Report parameter estimates."""
 
         modelType = self.type
+
+        if step == 'step1':
+            estimate = self.estimatesS1
+            se = self.seS1
+        else:
+            estimate = self.estimates
+            se = self.se
+
         match modelType:
             case 'logit':
                 estimates = pd.DataFrame()
                 estimates["var. name"] = self.xName + [self.pName]
-                estimates["coefficient"] = self.estimates
-                estimates["s.e."] = self.se
+                estimates["coefficient"] = estimate
+                estimates["s.e."] = se
             case 'mixed_logit':
                 
                 regressors =  self.xName + [self.pName]
@@ -86,7 +94,7 @@ class Model:
             
                 k = len(regressors)
                 ro = len(consumerAttr)
-                ru = sum(self.nu)
+                ru = int(sum(self.nu))
                 nParameters = k + k*ro + ru
 
                 XZNames = []
@@ -108,8 +116,8 @@ class Model:
                 estimates = pd.DataFrame()
                 estimates["coeficient"] = paramName
                 estimates["var. name"] = varName
-                estimates["coefficient"] = self.estimates
-                estimates["s.e."] = self.se
+                estimates["coefficient"] = estimate
+                estimates["s.e."] = se
 
         return estimates
     
@@ -157,9 +165,14 @@ class Model:
         # first step
         args = (X, Y, W, j)
         step1opt = fmin_bfgs(LogitGmmObjective, theta0, args=args)
+        # compute se step1
+        G = LogitGmmG(step1opt,X,Y,j)
+        out = LogitGmmObjective(step1opt, X,Y,W,j,out=True)
+        S = np.cov(out[1].T)
+        vcv = inv(G @ inv(S) @ G.T)/n
+        seStep1 = np.sqrt(np.diag(vcv))
 
         # second step
-        out = LogitGmmObjective(step1opt, X,Y,W,j,out=True)
         Omega = np.cov(out[1].T)
         W2 = inv(Omega)
         args = (X, Y, W2, j)
@@ -170,9 +183,9 @@ class Model:
         G = LogitGmmG(step2opt,X,Y,j)
         S = np.cov(out[1].T)
         vcv = inv(G @ inv(S) @ G.T)/n
-        se = np.sqrt(np.diag(vcv))
+        seStep2 = np.sqrt(np.diag(vcv))
 
-        return(step2opt,se)
+        return(step1opt,seStep1,step2opt,seStep2)
 
     def getElasticityLogit(self):
         """Compute elasticity in the Logit model. This command has to be runned 
@@ -339,7 +352,7 @@ class Model:
         j = self.J  # number of products
         nConsumers = n//j # number of consumers
         ro = Zeta.shape[1] # number of observed consumer attributes
-        ru = sum(self.nu)   # number of unobserved consumer attributes
+        ru = int(sum(self.nu))   # number of unobserved consumer attributes
         nXZpairs = len(xzPairs) # number of first-choice moments
         nX1X2pairs = len(x1x2Charac) # number of first-choice moments
         nParameters = k + k*ro + ru
@@ -348,7 +361,9 @@ class Model:
         nMoment3 = nX1X2pairs
         nMoments = nMoment1 + nMoment2 + nMoment3 # total number of moments
 
-        assert nMoments>=nParameters, "Model is underindentified"
+        #assert nMoments>=nParameters, "Model is underindentified"
+        if nMoments>=nParameters:
+            warnings.warn("Model is underindentified")
 
         ns = self.ns
         nr = self.nr 
@@ -475,20 +490,29 @@ class Model:
                             XrAll,ZetarAll,NurAll,XZetarAll,X12rAll,
                             sampleG,useM2,secondChoice,W)
 
+        # compute s.e. of first step
+        d = 1e-6 
+        D = computeDerivativeMomentMixedLogit(d,step1opt,Xr,Zetar,XZetar,X12r,Nur,
+                      j,k,ro,nuPosition,jChosenShare,
+                      sampleG, useM2,secondChoice,W)
+        VarCov = inv(D.T @ W @ D)/nConsumers
+        # se
+        seStep1 = np.sqrt(np.diag(VarCov))
+        
         # compute total variance
         moment_variance = sampleVar + simulationVar
 
         # set W = inv(variance)
-        #W2 = np.diag(inv(moment_variance))
         W2 = inv(moment_variance)
+
+        
 
         # second step
         args = (Xr, Zetar,XZetar,X12r,Nur,j,k,ro,nuPosition,jChosenShare,
                 sampleG,useM2,secondChoice,W2,out)
         step2opt = fmin_bfgs(MixedLogitGmmObj, step1opt, args=args,
                               callback=iter_print)
-        
-        
+                
         # compute s.e.
         # Get numerical derivative
         d = 1e-6 
@@ -502,12 +526,13 @@ class Model:
                             sampleG,useM2,secondChoice,W2)
         moment_variance = sampleVar + simulationVar
         W3 = inv(moment_variance)
+        
         # get variance covariance matrix
         VarCov = inv(D.T @ W3 @ D)/nConsumers
         # se
-        se = np.sqrt(np.diag(VarCov))
+        seStep2 = np.sqrt(np.diag(VarCov))
 
-        return(step2opt,se)
+        return(step1opt,seStep1,step2opt,seStep2)
 
 
 
