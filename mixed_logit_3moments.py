@@ -25,7 +25,7 @@ modelSpec.y2 = "SecondChoice" # choice variable
 modelSpec.x = ["brand_Aquafresh","brand_Crest","brand_Sensodyne",
                 "mint","white","fluoride","kids",
                 "sizeNorm","discount","familypack"]  
-modelSpec.p = "priceperoz"  # product price
+modelSpec.p = "priceperpack"  # product price
 # obs. consumer attributes
 modelSpec.zeta = ["inc","ed_HighSchool","purchase_InStore","age","gen_Female"]  
 # what consumer and product characteristics to interact to form random coefficients
@@ -33,7 +33,6 @@ modelSpec.zeta = ["inc","ed_HighSchool","purchase_InStore","age","gen_Female"]
 indexP = len(modelSpec.x)
 modelSpec.XZetaRC = [
      [indexP,0], # price and income
-     [8,0], # discount and income
      [3,2],[5,2],[6,2],[7,2],[8,2], # in store and several
      [4,1], [5,1], [7,1], [9,1] # moreCollege and several characteristics 
     ]
@@ -65,7 +64,7 @@ modelSpec.XZetaInter = [
 # second-choice to interact to form second-choice momentes
 # It must be defined as a list of indexes
 # ExampleX=4 -> interact price
-modelSpec.X1X2Inter = [] 
+modelSpec.X1X2Inter = [0,2,indexP] 
 
 # unobs. consumer attributes. It is a kx1 vector, where k = len([X,p]), or 0s 
 # and 1s. A 1 in entry k indicates that product characteristic k is interacted with
@@ -75,7 +74,7 @@ modelSpec.ns = 1000   # number of draws for Monte-Carlo integration
 modelSpec.nr = 50    # number of resamplings needed to compute variance
 modelSpec.seed = 1984 # seed for random number generation
 
-modelSpec.secondChoice = False # Whether second choice moments are used in estimation
+modelSpec.secondChoice = True # Whether second choice moments are used in estimation
 modelSpec.brands = "brandid"      # brand name variable
 
 modelSpec.M2M3short = True  # whether moments M2 and M3 are computed
@@ -96,7 +95,7 @@ elasticities = mixedLogitMod.reportElasticities()
 print(elasticities)
 
 # save to excel file
-file = 'outputs/m_long_peroz_2m.xlsx'
+file = 'outputs/m_short_perpack_3m.xlsx'
 sheet_estimates = 'estimates'
 sheet_estimates_s1 = 'estimates_step1'
 sheet_elasticities = 'elasticities'

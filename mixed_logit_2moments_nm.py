@@ -53,12 +53,6 @@ modelSpec.XZetaRC = [
 # else:
 #     modelSpec.XZetaInter = []
 modelSpec.XZetaInter = [
-    [indexP,0], # price and income
-    [0,1], [0,2],  # Aquafresh vs ed_MoreCollege, purchase_InStore
-    [2,1], [2,2],  # Sensodyne and...
-    [4,0], [8,0], # white, discount and income
-    [4,1], [5,1], [7,1], [9,1], # moreCollege and several characteristics
-    [3,2],[5,2],[6,2],[7,2],[8,2] # in store and several
 ]
 
 # Third moment interactions: choose which product characteristics of first- and
@@ -96,7 +90,7 @@ elasticities = mixedLogitMod.reportElasticities()
 print(elasticities)
 
 # save to excel file
-file = 'outputs/m_long_peroz_2m.xlsx'
+file = 'outputs/m_short_peroz_2m_nm.xlsx'
 sheet_estimates = 'estimates'
 sheet_estimates_s1 = 'estimates_step1'
 sheet_elasticities = 'elasticities'

@@ -57,8 +57,9 @@ modelSpec.X1X2Inter = []
 # unobs. consumer attributes. It is a kx1 vector, where k = len([X,p]), or 0s 
 # and 1s. A 1 in entry k indicates that product characteristic k is interacted with
 # an unobserved consumer attribute.
-nu = np.zeros((len(modelSpec.x)+1,))
-nu[-1] = 1
+#nu = np.zeros((len(modelSpec.x)+1,))
+#nu[-1] = 1
+nu = np.ones((len(modelSpec.x)+1,))
 modelSpec.nu = nu
 modelSpec.ns = 1000   # number of draws for Monte-Carlo integration
 modelSpec.nr = 50    # number of resamplings needed to compute variance
@@ -66,7 +67,7 @@ modelSpec.seed = 1984 # seed for random number generation
 
 modelSpec.secondChoice = False # Whether second choice moments are used in estimation
 modelSpec.brands = "brandid"      # brand name variable
-modelSpec.M2M3short = False  # whether moments M2 and M3 are computed
+modelSpec.M2M3short = True  # whether moments M2 and M3 are computed
                             # using short formula or not
 
 # Model instance creation
@@ -84,7 +85,7 @@ elasticities = mixedLogitMod.reportElasticities()
 print(elasticities)
 
 # save to excel file
-file = 'outputs/m_long_peroz_rcPrice.xlsx'
+file = 'outputs/m_short_peroz_rcPrice_unobs.xlsx'
 sheet_estimates = 'estimates'
 sheet_estimates_s1 = 'estimates_step1'
 sheet_elasticities = 'elasticities'

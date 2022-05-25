@@ -13,7 +13,10 @@ import warnings
 
 
 class ModelSpecification():
-    pass
+    
+    def copy(self):
+        pass
+        
 
 class Model:
     def __init__(self,spec):
@@ -47,6 +50,9 @@ class Model:
         self.M2M3short =  spec.M2M3short   # whether moments M2 and M3 are computed
                                            # using short formula or not
 
+        # demean varaibles (important for moments involving correlations)
+        self.demean()
+
         # simulate data for MC integration
         if self.type != 'logit':
             k = len(self.xName) + 1
@@ -62,6 +68,15 @@ class Model:
             self.MCSample = []
             self.useM2  = False
 
+    def demean(self):
+        
+        old_data = self.data[self.xName+self.zName + [self.pName]].copy()
+        means = np.expand_dims(old_data.to_numpy().mean(axis=0),axis=0)
+        sds =  np.expand_dims(old_data.to_numpy().std(axis=0),axis=0)       
+        a =  (self.data[self.xName+self.zName + [self.pName]].to_numpy() - means)/sds
+        self.data[self.xName+self.zName + [self.pName]] = a
+        return self
+    
     def fit(self):
         """Estimate the model"""
 
@@ -90,6 +105,14 @@ class Model:
                 estimates["var. name"] = self.xName + [self.pName]
                 estimates["coefficient"] = estimate
                 estimates["s.e."] = se
+                estimates["t-stat"] = estimates["coefficient"]/estimates["s.e."]
+                estimates["sig"] = np.where(
+                        np.abs(estimates['t-stat']) >= 2.576, "***", np.where(
+                        np.abs(estimates['t-stat']) >= 1.96, "**", np.where(
+                        np.abs(estimates['t-stat']) >= 1.645, "*", ""    
+                        ))) 
+
+
             case 'mixed_logit':
                 
                 regressors =  self.xName + [self.pName]
@@ -125,6 +148,12 @@ class Model:
                 estimates["var. name"] = varName
                 estimates["coefficient"] = estimate
                 estimates["s.e."] = se
+                estimates["t-stat"] = estimates["coefficient"]/estimates["s.e."]
+                estimates["sig"] = np.where(
+                        np.abs(estimates['t-stat']) >= 2.576, "***", np.where(
+                        np.abs(estimates['t-stat']) >= 1.96, "**", np.where(
+                        np.abs(estimates['t-stat']) >= 1.645, "*", ""    
+                        ))) 
 
         return estimates
     
@@ -285,7 +314,8 @@ class Model:
         p = np.expand_dims(X[:,price_index],axis=1)
 
         # elasticity matrix
-        elasticities = np.zeros([J,J])
+        elasticities_1 = np.zeros([J,J])
+        elasticities_2 = np.zeros([J,J])
 
         for j in range(J):
             # change in price
@@ -300,10 +330,18 @@ class Model:
             # compute elasticity wrt price pj
             ej = ((Yj-Ypred)/d)*p/Ypred
 
-            # average across consumers and store            
-            elasticities[:,j] = ej.reshape((J,ni),order='F').mean(axis=1)
+            # average across consumers
+            e1 = ej.reshape((J,ni),order='F').mean(axis=1)
+            elasticities_1[:,j] = e1 
 
-        return elasticities
+            # method 2: first average
+            avgDY = (Yj-Ypred).reshape((J,ni),order='F').mean(axis=1)
+            avgY = (Ypred).reshape((J,ni),order='F').mean(axis=1)
+            avgP = (p).reshape((J,ni),order='F').mean(axis=1)
+            e2 = (avgDY/avgY)/(d/avgP)
+            elasticities_2[:,j] = e2
+
+        return elasticities_2
     
     def fitMixedLogit(self):
         """Estimate a mixed logit model via GMM"""
@@ -342,7 +380,7 @@ class Model:
                            (self.data[self.y2Name]==1))].copy()
         
         # consumers for whom there is second choice data
-        SecondData = self.data[(~ self.data[self.y2Name].isnull())]
+        SecondData = self.data[(~ self.data[self.y2Name].isnull())].copy()
         consumerSecondData = SecondData[self.i]
         Y1SecondData = np.expand_dims(SecondData[self.yName].to_numpy(),axis=1)
         Y2SecondData = np.expand_dims(SecondData[self.y2Name].to_numpy(),axis=1)
@@ -448,10 +486,11 @@ class Model:
         # Moment 3: first= and second-choice moments: Cov(X^1,X^2)
         # number of moments = len(characteristics to compare)
         if secondChoice:
-
-            sampleM3 = (X1X2sample*Y1SecondData*Y2SecondData).\
-                        reshape((j,nConsSecondData,nX1X2pairs),order='F').\
-                        sum(axis=0)
+            
+            sampleM3 = X1X2sample[Y1SecondData.reshape((nConsSecondData*j,))==1,:]
+            #sampleM3 = (X1X2sample*Y1SecondData).\
+            #            reshape((j,nConsSecondData,nX1X2pairs),order='F').\
+            #            sum(axis=0)
             sampleG3 = np.expand_dims(sampleM3.mean(axis=0),axis=1)
 
         else:
@@ -499,9 +538,9 @@ class Model:
 
         # compute s.e. of first step
         d = 1e-6 
-        D = computeDerivativeMomentMixedLogit(d,step1opt,Xr,Zetar,XZetar,X12r,Nur,
+        D = MixedLogitGmmDerivative(step1opt,Xr,Zetar,XZetar,X12r,Nur,
                       j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
-                      sampleG, useM2,secondChoice,W)
+                      sampleG, useM2,secondChoice)
         VarCov = np.linalg.lstsq(D.T @ W @ D,np.eye(nParameters))[0]/nConsumers
         # se
         seStep1 = np.sqrt(np.diag(VarCov))
@@ -510,9 +549,9 @@ class Model:
         moment_variance = sampleVar + simulationVar
 
         # set W = inv(variance)
-        W2 = np.linalg.lstsq(moment_variance,np.eye(nMoments))[0]
-
-        
+        P = np.diag(np.diag(moment_variance))
+        y = np.linalg.lstsq(moment_variance@inv(P),np.eye(nMoments))[0]
+        W2 = np.linalg.lstsq(P,y)[0]        
 
         # second step
         args = (Xr, Zetar,XZetar,X12r,Nur,j,k,ro,nuPosition,XZetaRC,jChosenShare,
@@ -523,10 +562,14 @@ class Model:
                 
         # compute s.e.
         # Get numerical derivative
-        d = 1e-12
-        D = computeDerivativeMomentMixedLogit(d,step2opt,Xr,Zetar,XZetar,X12r,Nur,
+        d = 1e-6
+        D_num = computeDerivativeMomentMixedLogit(d,step2opt,Xr,Zetar,XZetar,X12r,Nur,
                       j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice,W2)
+
+        D = MixedLogitGmmDerivative(step2opt,Xr,Zetar,XZetar,X12r,Nur,
+                      j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
+                      sampleG, useM2,secondChoice)
         
         simulationVar = computeSimulationVariance(step2opt,j,k,ro,nuPosition,
                             XZetaRC,
@@ -543,17 +586,39 @@ class Model:
         y = np.linalg.lstsq(A@inv(P),np.eye(nParameters))[0]
         VarCov = np.linalg.lstsq(P,y)[0]/nConsumers
         # se
-        seStep2 = np.sqrt(np.diag(VarCov))
+        seStep2 = np.sqrt(np.abs(np.diag(VarCov)))
 
         return(step1opt,seStep1,step2opt,seStep2)
+
+    def print_results(self,file):
+        estimates = self.reportEstimates('step2')
+        estimates_s1 = self.reportEstimates('step1')
+        print(estimates)
+
+        self.estimateElasticities()
+        elasticities = self.reportElasticities()
+        print(elasticities)
+
+        # save to excel file
+        sheet_estimates = 'estimates'
+        sheet_estimates_s1 = 'estimates_step1'
+        sheet_elasticities = 'elasticities'
+
+        estimates.to_excel(file,sheet_name=sheet_estimates)
+        with pd.ExcelWriter(file,mode='a',if_sheet_exists='replace') as writer:  
+            estimates.to_excel(writer,sheet_name=sheet_estimates)
+            estimates_s1.to_excel(writer,sheet_name=sheet_estimates_s1)
+            elasticities.to_excel(writer,sheet_name=sheet_elasticities)
 
 
 
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
 
-    e_x = np.exp(x - np.max(x))
-    return e_x / e_x.sum(axis=0)
+    e_x = np.exp(x - np.max(x)) +1e-30
+    r = e_x / e_x.sum(axis=0)
+    #assert ~np.isnan(r).any()
+    return r 
 
 def LogitGmmObjective(theta,X,Y,W,J,out=False):
     """Compute GMM obj. function, J, given data (X,Y) and parameters theta.
@@ -678,14 +743,15 @@ def MixedLogitGmmObj(theta,X,Zeta,XZeta,X12,nu,
 
     
 
-    #assert ~np.isnan(Gd).any(), "Moments contain NaN"
+    assert ~np.isnan(Gd).any(), "Moments contain NaN"
 
     # Compute objective (J function)
     Obj = ni * (Gd.T @ W @ Gd)
     
-    if np.isnan(Gd).any():
-        Obj = lastValue*2
-        warnings.warn("Warning: found NaN in moments")
+    assert Obj>=0, "Negative objective function"
+    #if np.isnan(Gd).any():
+    #    Obj = lastValue*2
+    #    warnings.warn("Warning: found NaN in moments")
 
     lastValue = Obj
     #lastBetaBar = betaBar
@@ -817,6 +883,80 @@ def computeDerivativeMomentMixedLogit(d,theta,X,Zeta,XZeta,X12,nu,
                       sampleG, useM2,secondChoice,W, True)
         D[:,i] = ((g_i-gCentral)/d).T
     
+    return D
+
+def MixedLogitGmmDerivative(theta,X,Zeta,XZeta,X12,nu,
+                      J,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
+                      sampleG, useM2,secondChoice):
+    """Compute GMM obj. function, given data (X,Y,Z,Zeta,Nu) and parameters theta.
+    Mixed Logit model with individual level data."""
+    
+    global lastValue, functionCount, lastBetaBar, lastBetaO # used in message printing
+
+    n,k = X.shape
+    
+    betaBar, betaO, betaU = unpackParameters(theta,k,ro,nuPosition,XZetaRC)
+
+    # random coefficients
+    thetaC = np.ones((n,k))*betaBar.T + Zeta @ (betaO.T) +\
+           nu*(np.ones((n,k))*betaU.T)
+
+    U = np.expand_dims((X * thetaC).sum(axis=1),axis=1).\
+                    reshape((J,n//J),order='F')
+    Ypred = softmax(U).reshape((n,1),order='F')
+    Xi = X.reshape((J,int(n/J*k)),order='F') # each column is consumerXcharacteristic
+    Xj = np.kron(Xi,np.ones((J,1))) # product 1 J times, then product 2 J times, and so on
+    Xq = np.kron(np.ones((J,1)),Xi) # products 1 to J, repeat J times
+    Wq = np.kron(np.ones((J,k)), softmax(U)) # weights
+    Rq = (Xj-Xq)*Wq # Result times weight. Now need to sum every J entries
+    Ri = Rq.reshape(-1,J,Rq.shape[-1]).sum(1) # weighted avg. of Xj-Xq
+    R = Ri.reshape((n,k),order='F')
+
+    # shape
+    ni = n//J # number of consumers
+    nXZeta = XZeta.shape[1]
+    nParameters = len(theta)
+
+    RCDerivative = np.zeros((n,nParameters))
+
+    for i in range(nParameters):
+        thetaD = np.zeros((len(theta),))
+        thetaD[i] = 1
+        betaBar, betaO, betaU = unpackParameters(thetaD,k,ro,nuPosition,XZetaRC)
+        Dbeta = np.ones((n,k))*betaBar.T + Zeta @ (betaO.T) +\
+           nu*(np.ones((n,k))*betaU.T)
+        RCDerivative[:,i] = (Dbeta * R).sum(axis=1)
+    
+    # Derivative of G1
+    D1 = -1/n * (X*Ypred).T @ RCDerivative 
+
+    # Derivative of G2
+    if useM2:
+        M2 = -XZeta*Ypred
+        D2 = -J/n * M2.T @ RCDerivative
+    else:
+        D2 = []
+
+    # Derivative of G3
+    if secondChoice:
+        k2 = X12.shape[1]
+        X2Prob2 = secondChoiceXP(X12,U,n,J,k2)
+        M3 = (X12*X2Prob2)*Ypred
+
+        D3 = -J/n * M3.T @ RCDerivative
+    else:
+        D3 = []
+
+    # stack derivatives
+    if useM2 and secondChoice:
+        D = np.vstack((D1,D2,D3))
+    elif useM2:
+        D = np.vstack((D1,D2))
+    elif secondChoice:
+        D = np.vstack((D1,D3))
+    else:
+        D = D1
+
     return D
 
 def computeSimulationVariance(theta,j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
