@@ -10,7 +10,7 @@ dataFile = "data/Shining32.csv"
 data = pd.read_csv(dataFile)
 
 # Choose model
-model = 3 
+model = 1
 
 # Process data
 data = dp.CleanDataSet(data)
@@ -52,7 +52,7 @@ modelSpec.brands = "brandid"      # brand name variable
 modelSpec.M2M3short = True  # whether moments M2 and M3 are computed
                             # using short formula or not
 
-X1X2Inter = [5,indexP,2,1,7,3,0] 
+X1X2Inter = [3,8,7,indexP,1,5,9,4] 
 zeta = ["inc","ed_HighSchool","purchase_InStore","age","gen_Female"] 
 XZetaRC = [
      [indexP,0], # price and income

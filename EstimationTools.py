@@ -50,8 +50,9 @@ class Model:
         self.M2M3short =  spec.M2M3short   # whether moments M2 and M3 are computed
                                            # using short formula or not
 
+        
         # demean varaibles (important for moments involving correlations)
-        self.demean()
+        #self.demean()
 
         # simulate data for MC integration
         if self.type != 'logit':
@@ -70,11 +71,11 @@ class Model:
 
     def demean(self):
         
-        old_data = self.data[self.xName+self.zName + [self.pName]].copy()
+        old_data = self.data[self.xName+self.zName].copy()
         means = np.expand_dims(old_data.to_numpy().mean(axis=0),axis=0)
         sds =  np.expand_dims(old_data.to_numpy().std(axis=0),axis=0)       
-        a =  (self.data[self.xName+self.zName + [self.pName]].to_numpy() - means)/sds
-        self.data[self.xName+self.zName + [self.pName]] = a
+        a =  (self.data[self.xName+self.zName].to_numpy() - means)/sds
+        self.data[self.xName+self.zName] = a
         return self
     
     def fit(self):
@@ -434,12 +435,20 @@ class Model:
             for i in range(nX1X2pairs):
                 varName = X1X2Names[i]
                 Xvar = regressors[x1x2Charac[i]]
-                dataInteractionsX1X2[varName] = firstProductData[Xvar].to_numpy()*\
-                                                secondProductData[Xvar].to_numpy()
+
+                X1 = firstProductData[Xvar].to_numpy()
+                #X1 = (X1 - np.expand_dims(X1.mean(axis=0),0))/\
+                #        np.expand_dims(X1.std(axis=0),0)
+                X2 = secondProductData[Xvar].to_numpy()
+                #X2 = (X2 - np.expand_dims(X2.mean(axis=0),0))/\
+                #        np.expand_dims(X2.std(axis=0),0)
+
+                dataInteractionsX1X2[varName] = X1*X2
                 MCSample[varName] = MCSample[Xvar]
                 dX1X2 = np.expand_dims(dataInteractionsX1X2[varName].to_numpy(),
                                         axis=1)
                 SecondData[varName] = np.kron(dX1X2,np.ones((j,1)))
+
             X12rAll = MCSample[X1X2Names].to_numpy()    # characteristics to interact 
                                                  # between first and second choice
             X1X2sample = SecondData[X1X2Names].to_numpy() 
@@ -570,6 +579,8 @@ class Model:
         D = MixedLogitGmmDerivative(step2opt,Xr,Zetar,XZetar,X12r,Nur,
                       j,k,ro,nuPosition,XZetaRC,jChosenShare,M2M3short,
                       sampleG, useM2,secondChoice)
+
+        #D = D_num
         
         simulationVar = computeSimulationVariance(step2opt,j,k,ro,nuPosition,
                             XZetaRC,
@@ -926,6 +937,7 @@ def MixedLogitGmmDerivative(theta,X,Zeta,XZeta,X12,nu,
         Dbeta = np.ones((n,k))*betaBar.T + Zeta @ (betaO.T) +\
            nu*(np.ones((n,k))*betaU.T)
         RCDerivative[:,i] = (Dbeta * R).sum(axis=1)
+
     
     # Derivative of G1
     D1 = -1/n * (X*Ypred).T @ RCDerivative 
@@ -956,6 +968,8 @@ def MixedLogitGmmDerivative(theta,X,Zeta,XZeta,X12,nu,
         D = np.vstack((D1,D3))
     else:
         D = D1
+
+    assert ~np.any(D==0), "Derivative = 0"
 
     return D
 
