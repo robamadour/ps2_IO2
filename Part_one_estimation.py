@@ -27,7 +27,7 @@ modelSpec.y2 = "SecondChoice" # choice variable
 # product characteristics
 modelSpec.x = ["brand_Aquafresh","brand_Colgate","brand_Sensodyne",
                 "mint","white","fluoride","kids",
-                "sizeNorm","discount","familypack"]  
+                "sizeNorm","discount","familypack","constant"]  
 modelSpec.p = "priceperoz"  # product price
 # obs. consumer attributes
 modelSpec.zeta = []  
@@ -53,21 +53,17 @@ modelSpec.brands = "brandid"      # brand name variable
 modelSpec.M2M3short = True  # whether moments M2 and M3 are computed
                             # using short formula or not
 
-X1X2Inter = [3,8,7,indexP,1,5,9,4] 
-zeta = ["inc","ed_HighSchool","purchase_InStore","age","gen_Female"] 
+X1X2Inter = [3,8,7,indexP] 
+zeta = ["inc","ed_HighSchool","purchase_InStore","age","gen_Female",
+        "loc_Manhattan","loc_Brooklyn","loc_Other"] 
 XZetaRC = [
      [indexP,0], # price and income
      [3,2],[5,2],[6,2],[7,2],[8,2], # in store and several
-     [4,1], [5,1], [7,1], [9,1] # moreCollege and several characteristics 
     ]
 
 XZetaInter = [
     [indexP,0], # price and income
-    [0,1], [0,2],  # Aquafresh vs ed_MoreCollege, purchase_InStore
-    [2,1], [2,2],  # Sensodyne and...
-    [4,0], [8,0], # white, discount and income
-    [4,1], [5,1], [7,1], [9,1], # moreCollege and several characteristics
-    [3,2],[5,2],[6,2],[7,2],[8,2] # in store and several
+    [3,2],[5,2],[6,2],[7,2],[8,2], # in store and several
 ]
 
 match model:

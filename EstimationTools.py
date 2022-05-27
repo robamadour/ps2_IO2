@@ -71,11 +71,14 @@ class Model:
 
     def demean(self):
         
-        old_data = self.data[self.xName+self.zName].copy()
+        xNameNoConst = self.xName.copy()
+        if 'constant' in xNameNoConst:
+            xNameNoConst.remove('constant')
+        old_data = self.data[xNameNoConst+self.zName].copy()
         means = np.expand_dims(old_data.to_numpy().mean(axis=0),axis=0)
         sds =  np.expand_dims(old_data.to_numpy().std(axis=0),axis=0)       
-        a =  (self.data[self.xName+self.zName].to_numpy() - means)/sds
-        self.data[self.xName+self.zName] = a
+        a =  (self.data[xNameNoConst+self.zName].to_numpy() - means)/sds
+        self.data[xNameNoConst+self.zName] = a
         return self
     
     def fit(self):
@@ -686,7 +689,7 @@ class Model:
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
 
-    e_x = np.exp(x - 0*np.expand_dims(x[0,:],axis=0)) +1e-30
+    e_x = np.exp(x - np.expand_dims(x[0,:],axis=0)) +1e-10
     r = e_x / e_x.sum(axis=0)
     #assert ~np.isnan(r).any()
     return r 
