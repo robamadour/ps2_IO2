@@ -10,7 +10,7 @@ dataFile = "data/Shining32.csv"
 data = pd.read_csv(dataFile)
 
 # Choose model
-model = 1
+model = 3
 
 # Process data
 data = dp.CleanDataSet(data)
@@ -41,9 +41,10 @@ modelSpec.XZetaInter = []
 modelSpec.X1X2Inter = []
 # unobserved characteristics 
 nu = np.ones((len(modelSpec.x)+1,))
+#nu[indexP] = 0
 modelSpec.nu = nu
 modelSpec.ns = 1000   # number of draws for Monte-Carlo integration
-modelSpec.nr = 50    # number of resamplings needed to compute variance
+modelSpec.nr = 10    # number of resamplings needed to compute variance
 modelSpec.seed = 1984 # seed for random number generation
 
 modelSpec.secondChoice = False # Whether second choice moments are used in estimation

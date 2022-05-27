@@ -52,7 +52,7 @@ class Model:
 
         
         # demean varaibles (important for moments involving correlations)
-        #self.demean()
+        self.demean()
 
         # simulate data for MC integration
         if self.type != 'logit':
@@ -164,7 +164,7 @@ class Model:
             case 'logit':
                 self.elasticities = self.getElasticityLogit()
             case 'mixed_logit':
-                self.elasticities = self.getElasticitiesMixedLogit(1e-12)
+                self.elasticities = self.getElasticitiesMixedLogit(1e-2)
         
 
     def reportElasticities(self):
@@ -314,6 +314,64 @@ class Model:
         # get price
         p = np.expand_dims(X[:,price_index],axis=1)
 
+        # avg price and probability
+        avg_p  = p.reshape((J,ni),order='F').mean(axis=1)
+        avg_y = Ypred.reshape((J,ni),order='F').mean(axis=1)
+
+        # get price coefficient
+        p_coeff = np.expand_dims(beta[:,-1],axis=1)
+
+        # elasticity matrix
+        elasticities_1 = np.zeros([J,J])
+
+        for j in range(J):
+            
+            # product index
+            index_j = np.zeros((J,1))
+            index_j[j,0] = 1
+            index_j = np.kron(np.ones((ni,1)),index_j)
+
+            # price j
+            pj = avg_p[j]
+            
+            Yj = np.kron(Ypred.reshape((J,ni),order='F')[j,:],np.ones((1,J))).T
+
+            # compute elasticity wrt price pj
+            dydp = ((index_j - Yj)*p_coeff*Ypred).\
+                        reshape((J,ni),order='F').mean(axis=1)            
+
+            # average across consumers
+            e1 = dydp*pj/avg_y
+            elasticities_1[:,j] = e1 
+
+        return elasticities_1
+        
+
+    
+    def getElasticitiesMixedLogit2(self,d):
+        
+        theta = self.estimates
+        X, Zeta, XZeta, nu, J, ro, nuPosition,XZetaRC, price_index = self.getComputationMatrices()
+
+        # shape
+        n,k = X.shape
+        ni = n//J # number of consumers
+        nXZeta = XZeta.shape[1]
+        
+        # unpack theta 
+        betaBar, betaO, betaU = unpackParameters(theta,k,ro,nuPosition,XZetaRC)
+
+        # random coefficients
+        beta = np.ones((n,k))*betaBar.T + Zeta @ (betaO.T) +\
+            nu*(np.ones((n,k))*betaU.T)
+        
+        # Get prob. of buying product j
+        U = (X*beta).sum(axis=1).reshape((J,ni),order='F')
+        Ypred = softmax(U).reshape((n,1),order='F')
+
+        # get price
+        p = np.expand_dims(X[:,price_index],axis=1)
+
         # elasticity matrix
         elasticities_1 = np.zeros([J,J])
         elasticities_2 = np.zeros([J,J])
@@ -321,7 +379,7 @@ class Model:
         for j in range(J):
             # change in price
             dp = np.zeros([J,1])
-            dp[j,:] = d
+            dp[j,:] = d*p.mean(axis=0).mean()
             pj = p + np.kron(np.ones((ni,1)),dp)
             Xj = np.copy(X)
             Xj[:,price_index] = pj.reshape((n,))
@@ -337,6 +395,8 @@ class Model:
 
             # method 2: first average
             avgDY = (Yj-Ypred).reshape((J,ni),order='F').mean(axis=1)
+            if np.any(avgDY==0):
+                pass
             avgY = (Ypred).reshape((J,ni),order='F').mean(axis=1)
             avgP = (p).reshape((J,ni),order='F').mean(axis=1)
             e2 = (avgDY/avgY)/(d/avgP)
@@ -496,10 +556,10 @@ class Model:
         # number of moments = len(characteristics to compare)
         if secondChoice:
             
-            sampleM3 = X1X2sample[Y1SecondData.reshape((nConsSecondData*j,))==1,:]
-            #sampleM3 = (X1X2sample*Y1SecondData).\
-            #            reshape((j,nConsSecondData,nX1X2pairs),order='F').\
-            #            sum(axis=0)
+            #sampleM3 = X1X2sample[Y1SecondData.reshape((nConsSecondData*j,))==1,:]
+            sampleM3 = (X1X2sample*Y1SecondData).\
+                        reshape((j,nConsSecondData,nX1X2pairs),order='F').\
+                        sum(axis=0)
             sampleG3 = np.expand_dims(sampleM3.mean(axis=0),axis=1)
 
         else:
@@ -626,7 +686,7 @@ class Model:
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
 
-    e_x = np.exp(x - np.max(x)) +1e-30
+    e_x = np.exp(x - 0*np.expand_dims(x[0,:],axis=0)) +1e-30
     r = e_x / e_x.sum(axis=0)
     #assert ~np.isnan(r).any()
     return r 
