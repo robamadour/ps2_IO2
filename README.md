@@ -1,14 +1,6 @@
 # IO2_pset2
 Author: Roberto Zuniga
 Email: rz2516@columbia.edu
-Data: April 2022
+Data: May 2022
 
-Implemented:
-1. Logit estimation
-
-To do:
-1. Nested logit
-1. Mixed logit
-
-Comments:
-1. logit elasticities seem a bit off...
+To generate results run "Part_one_estimation.py" and choose model (1 to 5)

@@ -10,7 +10,7 @@ dataFile = "data/Shining32.csv"
 data = pd.read_csv(dataFile)
 
 # Choose model
-model = 3
+model = 4
 
 # Process data
 data = dp.CleanDataSet(data)
@@ -27,7 +27,7 @@ modelSpec.y2 = "SecondChoice" # choice variable
 # product characteristics
 modelSpec.x = ["brand_Aquafresh","brand_Colgate","brand_Sensodyne",
                 "mint","white","fluoride","kids",
-                "sizeNorm","discount","familypack","constant"]  
+                "sizeNorm","discount","familypack"]  
 modelSpec.p = "priceperoz"  # product price
 # obs. consumer attributes
 modelSpec.zeta = []  
@@ -53,7 +53,7 @@ modelSpec.brands = "brandid"      # brand name variable
 modelSpec.M2M3short = True  # whether moments M2 and M3 are computed
                             # using short formula or not
 
-X1X2Inter = [3,8,7,indexP] 
+X1X2Inter = [indexP] 
 zeta = ["inc","ed_HighSchool","purchase_InStore","age","gen_Female",
         "loc_Manhattan","loc_Brooklyn","loc_Other"] 
 XZetaRC = [
@@ -79,26 +79,8 @@ match model:
         # mixed logit, no obs. charactericstics + 2nd choice moments
         modelSpec.X1X2Inter = X1X2Inter
         modelSpec.secondChoice = True
-    
-    case 4:
-        # mixed logit + obs. charactericstics
-        modelSpec.zeta = zeta
-        modelSpec.XZetaRC = XZetaRC
-    
+
     case 5:
-        # mixed logit + obs ch. + 1st choice moments
-        modelSpec.zeta = zeta
-        modelSpec.XZetaRC = XZetaRC
-        modelSpec.XZetaInter = XZetaInter
-
-    case 6:
-        # mixed logit + obs. ch + 2nd choice moments
-        modelSpec.zeta = zeta
-        modelSpec.XZetaRC = XZetaRC
-        modelSpec.X1X2Inter = X1X2Inter
-        modelSpec.secondChoice = True
-
-    case 7:
          # mixed logit + obs. ch + 1st and 2nd choice moments
         modelSpec.zeta = zeta
         modelSpec.XZetaRC = XZetaRC
@@ -106,12 +88,7 @@ match model:
         modelSpec.XZetaInter = XZetaInter
         modelSpec.secondChoice = True
 
-    case 8:
-         # mixed logit + 1st choice moments
-        modelSpec.zeta = zeta
-        modelSpec.XZetaInter = XZetaInter
-
-    case 9:
+    case 4:
          # mixed logit +  1st and 2nd choice moments
         modelSpec.zeta = zeta
         modelSpec.X1X2Inter = X1X2Inter

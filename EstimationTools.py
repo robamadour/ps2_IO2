@@ -167,7 +167,10 @@ class Model:
             case 'logit':
                 self.elasticities = self.getElasticityLogit()
             case 'mixed_logit':
-                self.elasticities = self.getElasticitiesMixedLogit(1e-2)
+                self.elasticities, self.L1, self.L2, self.L3,\
+                    self.profit_before, self.profit_merger,\
+                    self.delta_welfare, self.corr = \
+                    self.getElasticitiesMixedLogit(1e-2)
         
 
     def reportElasticities(self):
@@ -178,6 +181,17 @@ class Model:
         table = pd.DataFrame({'product quantity' : 1+np.arange(self.J)})
         for j in range(self.J):
             table["p_"+str(1+j)] = elasticities[:,j]
+        
+        table["L_singleProd"] = self.L1
+        table["L_multiProd"] = self.L2
+        table["L_merger"] = self.L3
+        table["Profit_before"] = self.profit_before
+        table["Profit_merger"] = self.profit_merger
+        table["Change_welfare"] = self.delta_welfare
+        
+        print("-----------------------------------------------------")
+        print("Correlation between brand fixed effects and price sensitivity:")
+        print(self.corr)
         return table 
                 
 
@@ -297,6 +311,7 @@ class Model:
         
         theta = self.estimates
         X, Zeta, XZeta, nu, J, ro, nuPosition,XZetaRC, price_index = self.getComputationMatrices()
+        Y = np.expand_dims(self.data[self.yName], axis=1)
 
         # shape
         n,k = X.shape
@@ -326,6 +341,7 @@ class Model:
 
         # elasticity matrix
         elasticities_1 = np.zeros([J,J])
+        DyDp = np.zeros([J,J])
 
         for j in range(J):
             
@@ -340,15 +356,97 @@ class Model:
             Yj = np.kron(Ypred.reshape((J,ni),order='F')[j,:],np.ones((1,J))).T
 
             # compute elasticity wrt price pj
+
+            # derivative
             dydp = ((index_j - Yj)*p_coeff*Ypred).\
                         reshape((J,ni),order='F').mean(axis=1)            
+
+            DyDp[:,j] = dydp
 
             # average across consumers
             e1 = dydp*pj/avg_y
             elasticities_1[:,j] = e1 
 
-        return elasticities_1
+        # Correlation: brand fixed efects and price sensitivity
+        betaCorr = beta[:,[0,1,2,price_index]]
+        Corr = np.corrcoef(betaCorr.T)
         
+        # compute Lerner indexes
+
+        # Ownership matrices
+        Omega_1 = np.identity(J)
+        Omega_2 = np.zeros((J,J))
+        Omega_2[:3,:3] = 1
+        Omega_2[3:6,3:6] = 1
+        Omega_2[6:8,6:8] = 1
+        Omega_2[8:10,8:10] = 1
+
+        avg_p = np.expand_dims(avg_p,1)
+        avg_y = np.expand_dims(avg_y,1)
+
+        # Lerner indexes
+        L1 = -(inv(Omega_1*DyDp) @ avg_y)/avg_p
+        L2 = -(inv(Omega_2*DyDp) @ avg_y)/avg_p
+
+        # Get marginal costs
+        mc = avg_p + inv(Omega_2*DyDp) @ avg_y
+
+        # Solve for prices after merger of Crest and Colgate
+        
+        # new ownership matrix
+        Omega_3 = np.zeros((J,J))
+        Omega_3[:3,:3] = 1
+        Omega_3[3:8,3:8] = 1
+        Omega_3[8:10,8:10] = 1
+
+        # initial price
+        p0 = mc - inv(Omega_3*DyDp) @ avg_y
+        args = (Omega_3,DyDp,beta,X,mc,price_index,n,J,ni)
+        # numerical solver
+        step1opt = fmin_bfgs(FuncPMerger, p0, args=args)
+        p_post_merger = step1opt.reshape((J,1))
+
+        # get new Lerner index
+        L3 = (p_post_merger - mc)/p_post_merger
+
+        # compute profits
+        
+        # at equilibrium
+        Pi_0 = (avg_p-mc)*avg_y*ni
+        # after merger
+        y_post_merger = getNewShare(p_post_merger,beta,X,price_index,n,J,ni) 
+        Pi_merger = (p_post_merger-mc)*y_post_merger.reshape((J,1))*ni
+
+
+        # Remove Crest
+
+        # predict first chice without Crest     
+
+        # first choice if Crest is not available
+        UnC = U.copy()
+        UnC[6:8,:] = -np.inf
+        choice = oneMax(UnC)
+        choice = choice.reshape((n,1),order='F')
+
+        # identify consumers who chose Crest in the first place
+        crest_index = np.zeros((J,1))
+        crest_index[6:8] = 1
+        crest_index = np.kron(np.ones((ni,1)),crest_index)
+        chose_crest = (Y==crest_index)
+        chose_crest = chose_crest.reshape((J,ni)).sum(axis=0)
+
+        # price coefficient to normalize utlity in dollar terms
+        p_coeff_i = p_coeff.reshape((J,ni)).mean(axis=0)
+
+        # computation of welfare change for consumers who chose Crest first and 
+        # had to change
+        U2 = U.reshape((n,1),order='F')
+        u_actual_choice = (U2*Y).reshape((J,ni),order='F').sum(axis=0)
+        u_no_crest = (U2*choice).reshape((J,ni),order='F').sum(axis=0)
+        d_welfare = ((u_no_crest-u_actual_choice)/p_coeff_i*chose_crest).sum()
+
+
+        return elasticities_1, L1, L2, L3, Pi_0, Pi_merger,d_welfare,Corr      
 
     
     def getElasticitiesMixedLogit2(self,d):
@@ -584,7 +682,7 @@ class Model:
                             useM2,secondChoice, indexConsumersSecondChoice)
         
         # Initial parameter and Weight matrix
-        theta0 = np.zeros([nParameters,1])
+        theta0 = np.zeros([nParameters,1])+0.1
         W = np.identity(nMoments)
 
         # initialize iterations
@@ -689,10 +787,22 @@ class Model:
 def softmax(x):
     """Compute softmax values for each sets of scores in x."""
 
-    e_x = np.exp(x - np.expand_dims(x[0,:],axis=0)) +1e-10
+    e_x = np.exp(x - 0*np.expand_dims(x[0,:],axis=0)) +1e-30
     r = e_x / e_x.sum(axis=0)
     #assert ~np.isnan(r).any()
-    return r 
+    return r
+
+def keepMax(x):
+    n,k = x.shape
+    b = np.zeros_like(x)
+    b[x.argmax(0),np.arange(k)] = 1
+    return b 
+
+def oneMax(x):
+    n,k = x.shape
+    b = np.zeros_like(x)
+    b[x.argmax(0),np.arange(k)] = 1
+    return b
 
 def LogitGmmObjective(theta,X,Y,W,J,out=False):
     """Compute GMM obj. function, J, given data (X,Y) and parameters theta.
@@ -855,7 +965,11 @@ def secondChoiceXP(X,U,n,J,k):
     X  =X[index,:,:]
 
     # softmax, multiply by X and sum
-    Prob = softmax(U)
+    U = U.reshape((J-1,J*ni),order='F')
+    #Prob = keepMax(softmax(U)) # choose product with max utility
+    Prob = oneMax(U) # choose product with max utility
+    Prob = Prob.reshape(((J-1)*J,ni),order='F')
+    
     Prob = np.kron(np.ones((1,1,k)),np.expand_dims(Prob,axis=2)) 
     XProb = (X*Prob).reshape((J-1,J,ni,k),order='F').sum(axis=0)\
                     .reshape((n,k),order='F')
@@ -1075,4 +1189,26 @@ def pairsToIndex(pairs,k,r):
     return index  
     
 
+def FuncPMerger(p,Omega,DyDp,beta,X,mc,price_index,n,J,ni):
+        X2 = X.copy()
+        p = np.expand_dims(p,axis=1)
+        X2[:,price_index] = np.kron(np.ones((ni,1)),p).reshape((n,))
 
+        U = (X*beta).sum(axis=1).reshape((J,ni),order='F')
+        Ypred = softmax(U).reshape((n,1),order='F')
+        avg_y = Ypred.reshape((J,ni),order='F').mean(axis=1)
+
+        r = np.linalg.norm(p - mc + inv(Omega*DyDp) @ avg_y)
+
+        return r
+
+def getNewShare(p,beta,X,price_index,n,J,ni):
+        X2 = X.copy()
+        #p = np.expand_dims(p,axis=1)
+        X2[:,price_index] = np.kron(np.ones((ni,1)),p).reshape((n,))
+
+        U = (X*beta).sum(axis=1).reshape((J,ni),order='F')
+        Ypred = softmax(U).reshape((n,1),order='F')
+        avg_y = Ypred.reshape((J,ni),order='F').mean(axis=1)
+
+        return avg_y
